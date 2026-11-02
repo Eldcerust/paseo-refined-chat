@@ -51,6 +51,7 @@ import { useImageFile } from "./image-file";
 import { useEditAnchor } from "./edit-anchor";
 import { classifyShellTool } from "./tool-kind";
 import { extractToolText } from "./tool-text";
+import { noteSectionEnd, previousSectionEnd } from "./section-times";
 
 type JsonValue = boolean | null | number | string | JsonValue[] | { [key: string]: JsonValue };
 
@@ -634,6 +635,11 @@ export function LiveToolCallRenderer({
     cwd,
   );
 
+  // A settled tool is the end of a section; a reasoning card or reply that
+  // follows can measure its elapsed time from here.
+  const finishedAt = data.status === "running" ? undefined : timestamp.getTime();
+  if (finishedAt !== undefined) noteSectionEnd(agentId, finishedAt, "tool");
+
   return (
     <View {...hostFontEscape}>
       <ToolCallout
@@ -656,7 +662,7 @@ export function LiveToolCallRenderer({
             ? Math.min(data.startedAt ?? Number.POSITIVE_INFINITY, timestamp.getTime())
             : data.startedAt
         }
-        finishedAt={data.status === "running" ? undefined : timestamp.getTime()}
+        finishedAt={finishedAt}
       />
       <TimelineTailHub
         agentId={agentId}
@@ -670,6 +676,7 @@ export function LiveToolCallRenderer({
 }
 
 export function LiveReasoningRenderer({
+  agentId,
   item,
   theme,
   timestamp,
@@ -683,14 +690,20 @@ export function LiveReasoningRenderer({
   usePointerGlow(preferences.pointerGlow);
   useFrostedGlass(preferences.frostedGlass);
   const data = item.data;
-  // The host updates a reasoning item's timestamp with every streamed chunk, so
-  // the first streaming render is the only moment its start is visible. Keep
-  // that instant for the finished card's duration and tick from it meanwhile.
-  const startedAt = useRef<number | null>(null);
-  if (data.phase === "streaming" && startedAt.current === null) {
-    startedAt.current = timestamp.getTime();
-  }
   const endedAt = data.phase === "streaming" ? undefined : timestamp.getTime();
+  // The previous settled section is this one's start. That still holds when
+  // the card mounts after the thought finished (a scroll back, a reload, or a
+  // provider that sends the whole summary in one piece), where no live start
+  // was ever observed. The first streaming render is the fallback when the
+  // store has no previous section yet.
+  const sectionAt = endedAt ?? timestamp.getTime();
+  const previousEnd = previousSectionEnd(agentId, sectionAt);
+  const firstSeen = useRef<number | null>(null);
+  if (data.phase === "streaming" && firstSeen.current === null) {
+    firstSeen.current = timestamp.getTime();
+  }
+  const startedAt = previousEnd ?? firstSeen.current ?? undefined;
+  if (endedAt !== undefined) noteSectionEnd(agentId, endedAt, "reasoning");
   // The host owns the reveal cadence, so streamed reasoning animates the same
   // way it does in the native timeline instead of appearing in whole blocks.
   const revealed = useRevealedText(
@@ -744,11 +757,11 @@ export function LiveReasoningRenderer({
       id: "live-reasoning",
       agentModel: "",
       durationMs:
-        startedAt.current !== null && endedAt !== undefined
-          ? Math.max(0, endedAt - startedAt.current)
+        startedAt !== undefined && endedAt !== undefined
+          ? Math.max(0, endedAt - startedAt)
           : 0,
       totalTokens: Math.round(rawText.length / 4),
-      startedAt: startedAt.current ?? undefined,
+      startedAt,
       endedAt,
       status: data.phase === "streaming" ? "thinking" : "completed",
       steps:
@@ -764,7 +777,7 @@ export function LiveReasoningRenderer({
               },
             ],
     };
-  }, [data, revealed, endedAt]);
+  }, [data, revealed, endedAt, startedAt]);
 
   return (
     <View {...hostFontEscape}>
@@ -820,6 +833,7 @@ export function LiveTodoRenderer({ item, theme }: PluginTimelineItemProps<LiveTo
 
 export interface LiveAssistantPayload {
   text: string;
+  phase?: string;
 }
 
 /**
@@ -850,6 +864,18 @@ export function LiveAssistantRenderer({
   // where the host puts its own controls.
   const itemKey = `assistant:${timestamp.getTime()}`;
   const isTail = useIsTimelineTail(itemKey);
+
+  // The previous settled section is the start of this reply: the prompt for a
+  // reply with no tools, or the last tool/reasoning card otherwise. That is
+  // still known when the card mounts after the reply finished.
+  const endedAt = item.data.phase === "streaming" ? undefined : timestamp.getTime();
+  const sectionAt = endedAt ?? timestamp.getTime();
+  const previousEnd = previousSectionEnd(agentId, sectionAt);
+  const elapsedMs =
+    endedAt !== undefined && previousEnd !== undefined
+      ? Math.max(0, endedAt - previousEnd)
+      : undefined;
+  if (endedAt !== undefined) noteSectionEnd(agentId, endedAt, "assistant");
 
   // Job results, IRC relays and reminders arrive as replies because the host
   // files any unclaimed `custom` message under this item kind. They are not
@@ -883,6 +909,9 @@ export function LiveAssistantRenderer({
           at={timestamp}
           tokens={tokens}
           actions={isTail}
+          elapsedMs={elapsedMs}
+          elapsedFrom={previousEnd}
+          streaming={item.data.phase === "streaming"}
         />
       ) : null}
       <TimelineTailHub
@@ -999,6 +1028,9 @@ export function LiveUserMessageRenderer({
   // replay. A job result is not something the user said, so it never takes the
   // user bubble.
   const envelope = useMemo(() => parseSystemEnvelope(item.data.text), [item.data.text]);
+
+  // A prompt is the settled start of whatever section follows it.
+  noteSectionEnd(agentId, timestamp.getTime(), "user");
 
   return (
     <View {...surfaceProps(hostFontEscape, promptRowAnchor(item.data.messageId))}>

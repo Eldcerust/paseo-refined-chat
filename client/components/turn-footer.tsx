@@ -4,6 +4,7 @@ import { copyText } from "@getpaseo/plugin/client/react-native";
 import { Glyph } from "./glyph";
 import { unselectable } from "./selection";
 import { formatMessageTime } from "./message-time";
+import { LiveElapsed, formatDuration } from "./duration";
 import { radius } from "./theme-tokens";
 import type { ExtendedThemeTokens } from "./theme-tokens";
 import { TextSelectionDialog, touchSelectionEnabled, useTextSelection } from "./text-selection";
@@ -31,11 +32,25 @@ interface AssistantFooterProps {
    * sits. Every reply keeps its time in the bottom-right corner.
    */
   actions?: boolean;
+  /** Settled gap from the previous section's end to this reply's end. */
+  elapsedMs?: number;
+  /** Epoch ms this reply's section began; its live count while streaming. */
+  elapsedFrom?: number;
+  /** True while the reply is still arriving. */
+  streaming?: boolean;
 }
 
 const COPIED_MS = 1600;
 
-export function AssistantFooter({ text, at, tokens, actions = true }: AssistantFooterProps) {
+export function AssistantFooter({
+  text,
+  at,
+  tokens,
+  actions = true,
+  elapsedMs,
+  elapsedFrom,
+  streaming = false,
+}: AssistantFooterProps) {
   const [copied, setCopied] = useState(false);
   const { snapshot, openSelection, closeSelection } = useTextSelection(text);
 
@@ -90,10 +105,23 @@ export function AssistantFooter({ text, at, tokens, actions = true }: AssistantF
           fontFamily: tokens.fontUi,
           fontSize: tokens.fs(11),
           color: tokens.foregroundSubtle,
-          // The reply's own edge: the footer runs the width of the column, so
-          // the clock sits in its bottom-right corner rather than beside Copy.
-          marginLeft: "auto",
+          fontVariant: ["tabular-nums"],
           ...unselectable,
+        },
+        elapsed: {
+          fontFamily: tokens.fontUi,
+          fontSize: tokens.fs(11),
+          color: tokens.foregroundMuted,
+          fontVariant: ["tabular-nums"],
+          ...unselectable,
+        },
+        trailing: {
+          // The reply's own edge: the footer runs the width of the column, so
+          // the elapsed gap and the clock sit in its bottom-right corner.
+          marginLeft: "auto",
+          flexDirection: "row",
+          alignItems: "center",
+          gap: 8,
         },
       }),
     [tokens, copied],
@@ -133,7 +161,14 @@ export function AssistantFooter({ text, at, tokens, actions = true }: AssistantF
           <Text style={styles.copyLabel}>Select</Text>
         </Pressable>
       ) : null}
-      <Text style={styles.time}>{time}</Text>
+      <View style={styles.trailing}>
+        {streaming && elapsedFrom !== undefined ? (
+          <LiveElapsed startedAt={elapsedFrom} active style={styles.elapsed} />
+        ) : elapsedMs !== undefined ? (
+          <Text style={styles.elapsed}>{formatDuration(elapsedMs)}</Text>
+        ) : null}
+        <Text style={styles.time}>{time}</Text>
+      </View>
     </View>
   );
 }
