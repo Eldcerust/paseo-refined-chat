@@ -20,36 +20,33 @@ folds, and how it is coloured. Coverage of specialised events can differ by prov
 - Its own **find bar** (Ctrl/Cmd+F) that searches the whole chat, tool cards included.
 
 Refined Chat is an independent fork of [Beautiful Chat](https://github.com/ABorakati/beautiful-chat)
-by ABorakati. It is not affiliated with or endorsed by the upstream developer or Paseo. Both plugins
+by ABorakati, and this repository is a fork of [GenoDevelop/paseo-refined-chat](https://github.com/GenoDevelop/paseo-refined-chat)
+that adds touch selection on iOS and a question card that shows what was asked and answered. It is not
+affiliated with or endorsed by the upstream developers or Paseo. Both plugins
 intercept Paseo timeline items, so **disable Beautiful Chat before enabling Refined Chat**. See
 [Credits](#credits-and-license).
 
 ## Install
 
-From the Paseo catalog:
+Install from this repository, which follows `main`:
 
 ```bash
-paseo plugin add genodevelop/refined-chat
+paseo plugin add git:Eldcerust/paseo-refined-chat
 ```
 
-The plugin installs under the ID `refined-chat`. If you already have a plugin with that ID (an
-earlier install from Git, say), Paseo refuses with `Plugin ID "refined-chat" is already configured`:
+Or pin a commit:
+
+```bash
+paseo plugin add git:Eldcerust/paseo-refined-chat --ref <commit>
+```
+
+The plugin installs under the ID `refined-chat`. If you already have a plugin with that ID (the
+original Refined Chat, say), Paseo refuses with `Plugin ID "refined-chat" is already configured`:
 remove the old one with `paseo plugin remove refined-chat`, or give the new one another ID with
-`--id`, for example `paseo plugin add genodevelop/refined-chat --id refined-chat-catalog`.
+`--id`, for example `paseo plugin add git:Eldcerust/paseo-refined-chat --id refined-chat-fork`.
 
-The catalog installs a revision a reviewer has checked, and a new version reaches it
-only when it is submitted again. To follow `main` instead, install from the
-public GitHub repository:
-
-```bash
-paseo plugin add git:GenoDevelop/paseo-refined-chat
-```
-
-Or pin a published release by its tag:
-
-```bash
-paseo plugin add git:GenoDevelop/paseo-refined-chat --ref v0.5.0
-```
+To use the original instead, install it from the Paseo catalog with
+`paseo plugin add genodevelop/refined-chat`.
 
 Requires **Paseo 0.11.0 or later**. Everything below is configured in
 **Settings → Plugins → Refined Chat**, and each setting is stored on the client you change it on.
@@ -400,8 +397,8 @@ esbuild .showcase/showcase.tsx --bundle --outfile=.showcase/showcase.js --jsx=au
 
 ## Credits and license
 
-The original Beautiful Chat implementation is by **ABorakati**, and Refined Chat keeps its Git history
-and MIT license. Several features adapt work from open upstream pull requests, credited to their authors
+The original Beautiful Chat implementation is by **ABorakati**, Refined Chat is by **GenoDevelop**,
+and this fork keeps their Git history and MIT license. Several features adapt work from open upstream pull requests, credited to their authors
 in [NOTICE.md](NOTICE.md).
 
 Code is MIT-licensed; embedded fonts keep their own SIL OFL 1.1 terms. See [LICENSE](LICENSE),
