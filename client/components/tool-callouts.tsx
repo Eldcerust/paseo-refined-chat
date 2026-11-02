@@ -14,6 +14,7 @@ import type { ExtendedThemeTokens } from "./theme-tokens";
 import { HubCallout } from "./hub-callout";
 import { PaseoToolCallout } from "./paseo-tool-callouts";
 import { RunDuration } from "./duration";
+import { formatMessageTime } from "./message-time";
 import { SyntaxHighlightBlock, renderPlainOutput } from "./syntax-highlight";
 import { FoldedOutput } from "./folded-output";
 import type { PathKind } from "./markdown/file-path";
@@ -315,6 +316,12 @@ export function ToolCallout({
           fontFamily: tokens.fontUi,
           color: tokens.foregroundSubtle,
           // A live count must not jitter the header as its digits change.
+          fontVariant: ["tabular-nums"],
+        },
+        endTime: {
+          fontSize: tokens.fs(10),
+          fontFamily: tokens.fontUi,
+          color: tokens.foregroundSubtle,
           fontVariant: ["tabular-nums"],
         },
         statusBadge: {
@@ -696,6 +703,12 @@ export function ToolCallout({
             style={[styles.durationBadge, isRunning ? { color: tokens.accent } : null]}
             selectable
           />
+
+          {!isRunning && finishedAt !== undefined ? (
+            <Text selectable style={styles.endTime}>
+              {formatMessageTime(new Date(finishedAt))}
+            </Text>
+          ) : null}
 
           {data.exitCode !== undefined && data.exitCode !== 0 && (
             <Text selectable style={[styles.durationBadge, { color: tokens.danger }]}>

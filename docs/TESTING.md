@@ -78,6 +78,10 @@ Use a project that holds a Markdown file with a heading, a link to another file 
   the token usage when that row exists, not in the "You" header.
 - Every reply shows its clock at the right edge of the column. The newest reply
   also carries Copy and Select on the same row; an older reply has only its time.
+- A reasoning card shows a live count while it thinks, then "Thought for Xs" and
+  the clock time it ended at its top-right edge, even when folded.
+- A finished tool card shows its clock end time beside the duration in its
+  header. A card still running has the live timer instead.
 - Start a shell command that takes a few seconds (for example `Start-Sleep 8`
   in PowerShell or `sleep 8` in Bash). Its card shows a count that advances once
   a second while it runs, then settles on a readable duration such as `8s`.

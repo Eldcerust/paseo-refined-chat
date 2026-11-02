@@ -28,6 +28,10 @@ export interface ReasoningTraceData {
   durationMs: number;
   totalTokens: number;
   isStreaming?: boolean;
+  /** Epoch ms the trace was first seen streaming; drives the live count. */
+  startedAt?: number;
+  /** Epoch ms the last thought arrived, so the card can record when it ended. */
+  endedAt?: number;
   status: "thinking" | "completed" | "interrupted";
   steps: ReasoningStep[];
 }
