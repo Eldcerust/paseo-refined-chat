@@ -167,6 +167,12 @@ export function UserMessage({
           fontSize: tokens.fs(10),
           color: tokens.userTextMuted,
         },
+        clockRow: {
+          flexDirection: "row",
+          alignItems: "center",
+          justifyContent: "flex-end",
+          marginTop: 6,
+        },
         text: {
           fontFamily: tokens.fontUi,
           fontSize: tokens.fs(13.5),
@@ -219,11 +225,6 @@ export function UserMessage({
           <Text selectable style={styles.label}>
             You
           </Text>
-          {timestamp ? (
-            <Text selectable style={styles.clock}>
-              {formatMessageTime(timestamp)}
-            </Text>
-          ) : null}
           <Pressable
             onPress={handleCopy}
             accessibilityRole="button"
@@ -280,14 +281,23 @@ export function UserMessage({
             ))}
           </View>
         ) : null}
-        {usage ? (
-          <View style={styles.usageRow}>
-            <UsageFigure label="in" value={usage.inputTokens} styles={styles} />
-            <UsageFigure label="cached" value={usage.cachedInputTokens} styles={styles} />
-            <UsageFigure label="out" value={usage.outputTokens} styles={styles} />
-            {pending ? (
-              <Text selectable style={styles.usageKey}>
-                counting…
+        {usage || timestamp ? (
+          <View style={usage ? styles.usageRow : styles.clockRow}>
+            {usage ? (
+              <>
+                <UsageFigure label="in" value={usage.inputTokens} styles={styles} />
+                <UsageFigure label="cached" value={usage.cachedInputTokens} styles={styles} />
+                <UsageFigure label="out" value={usage.outputTokens} styles={styles} />
+                {pending ? (
+                  <Text selectable style={styles.usageKey}>
+                    counting…
+                  </Text>
+                ) : null}
+              </>
+            ) : null}
+            {timestamp ? (
+              <Text selectable style={styles.clock}>
+                {formatMessageTime(timestamp)}
               </Text>
             ) : null}
           </View>

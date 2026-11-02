@@ -72,6 +72,20 @@ Use a project that holds a Markdown file with a heading, a link to another file 
   that line, in the output and in the error output alike. A URL, a version number
   and a `\\host\share` path stay plain text.
 
+## Message times and the run timer
+
+- Every prompt shows its clock in the bottom-right corner of the bubble, beside
+  the token usage when that row exists, not in the "You" header.
+- Every reply shows its clock at the right edge of the column. The newest reply
+  also carries Copy and Select on the same row; an older reply has only its time.
+- Start a shell command that takes a few seconds (for example `Start-Sleep 8`
+  in PowerShell or `sleep 8` in Bash). Its card shows a count that advances once
+  a second while it runs, then settles on a readable duration such as `8s`.
+- Let a command run past a minute and check the label becomes `1m 5s`; a call
+  under a second reads `<1s`. A card loaded from history without a recorded
+  start keeps the provider's duration when one was sent, and otherwise shows no
+  duration rather than a wrong one.
+
 ## Touch selection (iOS)
 
 Use an iPhone or iPad; Android and web must look and behave as before.

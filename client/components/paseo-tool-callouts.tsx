@@ -9,6 +9,7 @@ import { radius } from "./theme-tokens";
 import type { ExtendedThemeTokens } from "./theme-tokens";
 import { ProviderLogo } from "./provider-logo";
 import { SyntaxHighlightBlock } from "./syntax-highlight";
+import { formatDuration } from "./duration";
 import { selectableSurface } from "./selection";
 import { selectionSurface } from "./selection-actions";
 import type {
@@ -126,7 +127,7 @@ export function PaseoToolCallout({
         <View style={styles.headerRight}>
           {data.durationMs ? (
             <Text selectable style={styles.durationBadge}>
-              {data.durationMs}ms
+              {formatDuration(data.durationMs)}
             </Text>
           ) : null}
           <Rotate active={expanded}>
