@@ -89,6 +89,7 @@ Use an iPhone or iPad; Android and web must look and behave as before.
   "Copied".
 - On Android and web no **Select** control appears, and a long-press does not
   open the dialog.
+
 ## Questions the agent asks
 
 Ask an agent to use its question tool, with one question and then with several
