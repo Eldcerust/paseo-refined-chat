@@ -154,7 +154,7 @@ for, then folds them again when it closes. Text selection covers only the lines 
 | **Read** | The file's language logo, a path that is a link (shown relative to the working directory when the file lies inside it), line numbers (real ones when the read starts mid-file), a copy button, and how many lines came back. |
 | **Write and Edit** | Diffs with old and new line numbers, adjacent removed and added rows joined into one block, and the changed words highlighted. The header carries `+X −Y`. A failed call shows no count, and a failed edit labels its diff "Not applied". The path is a link, like on a read card. |
 | **Images** | The picture itself instead of an empty code block. See [Images](#images). |
-| **Reasoning** | Live thinking text, a token badge, numbered steps, a connected rail with per-step time, a live count while thinking, then how long it took and the clock time it ended. |
+| **Reasoning** | Live thinking text, a token badge, numbered steps, a connected rail with per-step time, a live count while thinking, then the elapsed time since the previous section and the clock time it ended. |
 | **MCP** | Server badge, transport, input parameters and the response, each highlighted. |
 | **Eval** | One card per kernel cell: the source that ran, then what it printed. |
 | **Ask** | Option cards with the recommended badge, the chosen answer marked, and a typed reply labelled as typed. |
@@ -163,7 +163,7 @@ for, then folds them again when it closes. Text selection covers only the lines 
 | **Paseo tools** | Paseo's mark leads the card, and a created agent's provider carries its brand mark. |
 | **Checklist** | Phase name, per-task status and duration, and a blocked task with its reason. |
 | **Approval** | Risk class, the exact command, target path and working directory, with the approve and deny actions the host owns. |
-| **Prompt** | The authored turn on a raised surface with a copy button, the turn's token usage, and the time in the bottom-right corner. Every reply carries its own time in the bottom-right corner. |
+| **Prompt** | The authored turn on a raised surface with a copy button, the turn's token usage, and the time in the bottom-right corner. Every reply carries its own elapsed time and clock in the bottom-right corner. |
 
 A tool the plugin has no typed card for still shows its output in the terminal frame, and a call that
 printed nothing says so. No card renders an empty panel.

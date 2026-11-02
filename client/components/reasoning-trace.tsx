@@ -13,8 +13,14 @@ import { selectionSurface } from "./selection-actions";
 import type { ExtendedThemeTokens } from "./theme-tokens";
 import type { ReasoningTraceData, ReasoningStep } from "../../shared/contracts";
 import { SyntaxHighlightBlock } from "./syntax-highlight";
-import { LiveElapsed } from "./duration";
+import { LiveElapsed, formatDuration } from "./duration";
 import { formatMessageTime } from "./message-time";
+
+/** Tenths under a minute; human minutes and hours above it. */
+function formatElapsed(ms: number): string {
+  if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`;
+  return formatDuration(ms);
+}
 
 interface ReasoningTraceProps {
   data: ReasoningTraceData;
@@ -38,7 +44,7 @@ export function ReasoningTrace({
   }, []);
   const [activeStepId, setActiveStepId] = useState<string | null>(null);
 
-  const durationFormatted = (data.durationMs / 1000).toFixed(1);
+  const durationFormatted = formatElapsed(data.durationMs);
   const isThinking = data.status === "thinking";
 
   // A trace that was open only because it streamed folds once the thought ends.
@@ -294,7 +300,7 @@ export function ReasoningTrace({
                 {isThinking
                   ? "Thinking in progress…"
                   : data.durationMs > 0
-                    ? `Thought for ${durationFormatted}s`
+                    ? `Elapsed ${durationFormatted}`
                     : "Reasoning summary"}
               </Text>
             </View>
