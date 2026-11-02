@@ -300,7 +300,7 @@ export function ReasoningTrace({
                 {isThinking
                   ? "Thinking in progress…"
                   : data.durationMs > 0
-                    ? `Elapsed ${durationFormatted}`
+                    ? `Reasoning summary · Elapsed ${durationFormatted}`
                     : "Reasoning summary"}
               </Text>
             </View>
