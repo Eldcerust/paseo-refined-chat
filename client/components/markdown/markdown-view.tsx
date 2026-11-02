@@ -7,6 +7,7 @@ import { selectableSurface, unselectable } from "../selection";
 import { selectionSurface } from "../selection-actions";
 import { SyntaxHighlightBlock } from "../syntax-highlight";
 import { openLink } from "../open-link";
+import { TextSelectionDialog, longPressSelection, useTextSelection } from "../text-selection";
 import { pathKind, type PathKind } from "./file-path";
 import { linkProps, pathLinkProps, plainLinkProps } from "./link-style";
 import { headingSlugs, parseFileLink } from "../../file-link";
@@ -214,6 +215,8 @@ interface RenderContext {
   metrics: VariantMetrics;
   /** Lines of a code block shown before the rest folds; zero shows all. */
   codeMaxLines: number;
+  /** iOS: a long-press on prose opens the Select dialog. Empty elsewhere. */
+  longPress: { onLongPress?: () => void };
 }
 
 /**
@@ -292,9 +295,10 @@ export function MarkdownView({
     return { ...built, mark: marks ? built.mark : null };
   }, [tokens, variant, metrics, marks]);
   const { codeMaxLines } = useEnhancerPreferences();
+  const { snapshot, openSelection, closeSelection } = useTextSelection(text);
   const context = useMemo<RenderContext>(
-    () => ({ styles, tokens, metrics, codeMaxLines }),
-    [styles, tokens, metrics, codeMaxLines],
+    () => ({ styles, tokens, metrics, codeMaxLines, longPress: longPressSelection(openSelection) }),
+    [styles, tokens, metrics, codeMaxLines, openSelection],
   );
 
   const markBlock = (node: React.ReactNode, at: number) => (
@@ -347,6 +351,7 @@ export function MarkdownView({
 
   return (
     <View {...selectionSurface} style={styles.root}>
+      <TextSelectionDialog text={snapshot} onClose={closeSelection} tokens={tokens} />
       {rendered}
     </View>
   );
@@ -583,7 +588,7 @@ function renderBlock(
       const headingStyle = styles[HEADING_KEYS[block.level - 1] ?? "h4"];
       return (
         <View key={key} style={first ? styles.headingBlockFirst : styles.headingBlock}>
-          <Text selectable style={headingStyle}>
+          <Text selectable {...context.longPress} style={headingStyle}>
             {metrics.headingHash ? (
               <Text style={styles.headingHash}>{HASH_LABELS[block.level - 1] ?? "# "}</Text>
             ) : null}
@@ -596,7 +601,7 @@ function renderBlock(
 
     case "paragraph":
       return (
-        <Text key={key} selectable style={styles.paragraph}>
+        <Text key={key} selectable {...context.longPress} style={styles.paragraph}>
           {renderInline(block.spans, styles, key)}
         </Text>
       );
@@ -616,7 +621,7 @@ function renderBlock(
       return (
         <View key={key} style={styles.quote}>
           {block.paragraphs.map((spans, index) => (
-            <Text key={`${key}q${index}`} selectable style={styles.quoteText}>
+            <Text key={`${key}q${index}`} selectable {...context.longPress} style={styles.quoteText}>
               {renderInline(spans, styles, `${key}q${index}`)}
             </Text>
           ))}
@@ -654,7 +659,7 @@ function renderBlock(
 
     case "plain":
       return (
-        <Text key={key} selectable style={styles.plain}>
+        <Text key={key} selectable {...context.longPress} style={styles.plain}>
           {block.text}
         </Text>
       );
@@ -673,7 +678,11 @@ function renderItem(
   // The body is the flexible column, so a wrapped second line starts under the
   // item's first character instead of under its marker.
   const body = (
-    <Text selectable style={item.checked === true ? styles.itemTextDone : styles.itemText}>
+    <Text
+      selectable
+      {...context.longPress}
+      style={item.checked === true ? styles.itemTextDone : styles.itemText}
+    >
       {renderInline(item.spans, styles, key)}
     </Text>
   );
@@ -739,6 +748,7 @@ function renderTable(block: MdTableBlock, key: string, context: RenderContext): 
               <Text
                 key={cellKey}
                 selectable
+                {...context.longPress}
                 style={[
                   styles.tableHeaderCell,
                   styles[ALIGN_KEYS[block.align[column] ?? "left"]],
@@ -758,6 +768,7 @@ function renderTable(block: MdTableBlock, key: string, context: RenderContext): 
                 <Text
                   key={cellKey}
                   selectable
+                  {...context.longPress}
                   style={[
                     styles.tableCell,
                     styles[ALIGN_KEYS[block.align[column] ?? "left"]],
