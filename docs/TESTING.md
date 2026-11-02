@@ -87,6 +87,24 @@ Use a project that holds a Markdown file with a heading, a link to another file 
   that line, in the output and in the error output alike. A URL, a version number
   and a `\\host\share` path stay plain text.
 
+## Touch selection (iOS)
+
+Use an iPhone or iPad; Android and web must look and behave as before.
+
+- Reply footer: **Copy** and **Select** sit side by side. **Select** opens a
+  "Select text" dialog holding the whole reply.
+- Prompt bubble: a text-select icon follows the copy icon and opens the prompt.
+- Code block header: **Select** follows **Copy** and opens the block's whole
+  code, including lines hidden by "Show N more lines".
+- Long-press a heading, paragraph, list item, quote or table cell in a reply: the
+  dialog opens with the reply. Long-press a code line: it opens with the code.
+- In the dialog, long-press the text, drag the handles over part of it and tap
+  Copy; paste elsewhere and check only that part arrived. Select All copies all.
+- Press **Copy** on the same blocks: it still copies the whole text and shows
+  "Copied".
+- On Android and web no **Select** control appears, and a long-press does not
+  open the dialog.
+
 ## Interoperability
 
 - Keep the original Beautiful Chat plugin disabled. Both intercept the
