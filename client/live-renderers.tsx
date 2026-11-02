@@ -63,6 +63,8 @@ export interface LiveToolCallPayload {
   status: string;
   detail?: Record<string, unknown>;
   callId?: string;
+  /** Epoch milliseconds the call was first seen running. */
+  startedAt?: number;
   error?: string | null;
   phase?: string;
 }
@@ -649,6 +651,12 @@ export function LiveToolCallRenderer({
         cwd={cwd}
         shellMaxLines={preferences.shellMaxLines}
         codeMaxLines={preferences.codeMaxLines}
+        startedAt={
+          data.status === "running"
+            ? Math.min(data.startedAt ?? Number.POSITIVE_INFINITY, timestamp.getTime())
+            : data.startedAt
+        }
+        finishedAt={data.status === "running" ? undefined : timestamp.getTime()}
       />
       <TimelineTailHub
         agentId={agentId}
@@ -823,8 +831,9 @@ export function LiveAssistantRenderer({
   useFrostedGlass(preferences.frostedGlass);
 
   // Replacing the reply costs the host's footer, which the stream layout hangs
-  // off an `assistant_message` item that no longer exists. Rebuild it where the
-  // host puts it: under the newest message, once, not under every reply.
+  // off an `assistant_message` item that no longer exists. Rebuild the clock
+  // under every reply, and the Copy and Select actions under the newest one,
+  // where the host puts its own controls.
   const itemKey = `assistant:${timestamp.getTime()}`;
   const isTail = useIsTimelineTail(itemKey);
 
@@ -854,8 +863,13 @@ export function LiveAssistantRenderer({
           />
         </RevealPathContext.Provider>
       )}
-      {isTail && !envelope ? (
-        <AssistantFooter text={item.data.text} at={timestamp} tokens={tokens} />
+      {!envelope ? (
+        <AssistantFooter
+          text={item.data.text}
+          at={timestamp}
+          tokens={tokens}
+          actions={isTail}
+        />
       ) : null}
       <TimelineTailHub
         agentId={agentId}

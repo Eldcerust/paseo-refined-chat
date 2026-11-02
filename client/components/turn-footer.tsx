@@ -26,11 +26,16 @@ interface AssistantFooterProps {
   text: string;
   at: Date;
   tokens: ExtendedThemeTokens;
+  /**
+   * Copy and Select belong on the newest reply, where Paseo's own footer
+   * sits. Every reply keeps its time in the bottom-right corner.
+   */
+  actions?: boolean;
 }
 
 const COPIED_MS = 1600;
 
-export function AssistantFooter({ text, at, tokens }: AssistantFooterProps) {
+export function AssistantFooter({ text, at, tokens, actions = true }: AssistantFooterProps) {
   const [copied, setCopied] = useState(false);
   const { snapshot, openSelection, closeSelection } = useTextSelection(text);
 
@@ -85,6 +90,9 @@ export function AssistantFooter({ text, at, tokens }: AssistantFooterProps) {
           fontFamily: tokens.fontUi,
           fontSize: tokens.fs(11),
           color: tokens.foregroundSubtle,
+          // The reply's own edge: the footer runs the width of the column, so
+          // the clock sits in its bottom-right corner rather than beside Copy.
+          marginLeft: "auto",
           ...unselectable,
         },
       }),
@@ -98,20 +106,22 @@ export function AssistantFooter({ text, at, tokens }: AssistantFooterProps) {
   return (
     <View style={styles.container}>
       <TextSelectionDialog text={snapshot} onClose={closeSelection} tokens={tokens} />
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel={copied ? "Reply copied" : "Copy reply"}
-        onPress={handleCopy}
-        style={styles.copyButton}
-      >
-        <Glyph
-          name={copied ? "Check" : "Copy"}
-          size={12}
-          color={copied ? tokens.success : tokens.foregroundMuted}
-        />
-        <Text style={styles.copyLabel}>{copied ? "Copied" : "Copy"}</Text>
-      </Pressable>
-      {touchSelectionEnabled ? (
+      {actions ? (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={copied ? "Reply copied" : "Copy reply"}
+          onPress={handleCopy}
+          style={styles.copyButton}
+        >
+          <Glyph
+            name={copied ? "Check" : "Copy"}
+            size={12}
+            color={copied ? tokens.success : tokens.foregroundMuted}
+          />
+          <Text style={styles.copyLabel}>{copied ? "Copied" : "Copy"}</Text>
+        </Pressable>
+      ) : null}
+      {actions && touchSelectionEnabled ? (
         <Pressable
           accessibilityRole="button"
           accessibilityLabel="Select part of the reply"
