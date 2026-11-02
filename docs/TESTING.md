@@ -80,10 +80,10 @@ Use a project that holds a Markdown file with a heading, a link to another file 
   elapsed time since the previous section (a prompt, tool or thought). The
   newest reply also carries Copy and Select on the same row; an older reply has
   only its times.
-- A reasoning card shows a live count while it thinks, then "Elapsed Xs" and
-  the clock time it ended at its top-right edge, even when folded. Scroll back
-  to an old reasoning card: it still shows an elapsed time, measured from the
-  previous section, not "Reasoning summary".
+- A reasoning card shows a live count while it thinks, then keeps
+  "Reasoning summary" and appends "· Elapsed X" plus the clock time it ended at
+  its top-right edge, even when folded. Scroll back to an old reasoning card: it
+  still shows an elapsed time, measured from the previous section.
 - A finished tool card shows its clock end time beside the duration in its
   header. A card still running has the live timer instead.
 - Start a shell command that takes a few seconds (for example `Start-Sleep 8`
