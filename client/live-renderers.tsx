@@ -1008,6 +1008,7 @@ export function LiveAssistantRenderer({
             tokens={tokens}
             variant={preferences.markdownVariant}
             marks={preferences.highlightMarks}
+            nativeProse
           />
         </RevealPathContext.Provider>
       )}
