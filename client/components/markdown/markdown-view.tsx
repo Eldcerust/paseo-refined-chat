@@ -7,7 +7,14 @@ import { selectableSurface, unselectable } from "../selection";
 import { selectionSurface } from "../selection-actions";
 import { SyntaxHighlightBlock } from "../syntax-highlight";
 import { openLink } from "../open-link";
-import { TextSelectionDialog, longPressSelection, useTextSelection } from "../text-selection";
+import { Markdown as HostMarkdown } from "@getpaseo/plugin/client/ui";
+import {
+  TextSelectionDialog,
+  longPressSelection,
+  touchSelectionEnabled,
+  useTextSelection,
+} from "../text-selection";
+import { blockSource, isNativeBlock } from "./native-prose";
 import { pathKind, type PathKind } from "./file-path";
 import { linkProps, pathLinkProps, plainLinkProps } from "./link-style";
 import { headingSlugs, parseFileLink } from "../../file-link";
@@ -40,6 +47,12 @@ export interface MarkdownViewProps {
   /** A heading's slug to mark instead, as `#usage` in a link names it. */
   anchor?: string;
   onLinePosition?: (y: number) => void;
+  /**
+   * iOS: draw prose, headings, lists and quotes with Paseo's native renderer, so
+   * a selection can start in them. Code, tables and pictures stay with the plugin.
+   * Set for a reply; a file preview marks lines and keeps the plugin's drawing.
+   */
+  nativeProse?: boolean;
 }
 
 type MdTableBlock = Extract<MdBlock, { kind: "table" }>;
@@ -262,8 +275,9 @@ export function MarkdownView({
   line,
   anchor,
   onLinePosition,
+  nativeProse = false,
 }: MarkdownViewProps) {
-  const { blocks, starts, slugs } = useMemo(() => {
+  const { blocks, starts, slugs, lines } = useMemo(() => {
     const opened: number[] = [];
     const parsed = parseMarkdown(text, opened);
     // One slug per block; only a heading has one.
@@ -275,6 +289,7 @@ export function MarkdownView({
     return {
       blocks: parsed,
       starts: opened,
+      lines: text.replace(/\r\n?/g, "\n").split("\n"),
       slugs: parsed.map((block) => (block.kind === "heading" ? named[next++]! : null)),
     };
   }, [text]);
@@ -313,9 +328,29 @@ export function MarkdownView({
 
   // Pictures that follow one another sit in one row that wraps, not one under
   // the other: a reply with several screenshots reads as a strip, not a column.
+  // A host older than the native `Markdown` export leaves it undefined, and the
+  // plugin keeps drawing everything itself.
+  const native =
+    nativeProse &&
+    touchSelectionEnabled &&
+    Boolean(HostMarkdown) &&
+    starts.length === blocks.length;
+
   const rendered: React.ReactNode[] = [];
   for (let index = 0; index < blocks.length; index++) {
     const block = blocks[index]!;
+    if (native && isNativeBlock(block, marks)) {
+      // A run of such blocks is one native view, so a selection can cross them.
+      let end = index + 1;
+      while (end < blocks.length && isNativeBlock(blocks[end]!, marks)) end++;
+      rendered.push(
+        <View key={`n${index}`} style={index === 0 ? undefined : { marginTop: metrics.blockGap }}>
+          <HostMarkdown>{blockSource(lines, starts, index, end)}</HostMarkdown>
+        </View>,
+      );
+      index = end - 1;
+      continue;
+    }
     if (block.kind !== "image") {
       const node = renderBlock(block, `b${index}`, index === 0, context);
       rendered.push(index === marked ? markBlock(node, index) : node);
