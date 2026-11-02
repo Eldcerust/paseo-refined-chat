@@ -13,6 +13,8 @@ import { selectionSurface } from "./selection-actions";
 import type { ExtendedThemeTokens } from "./theme-tokens";
 import type { ReasoningTraceData, ReasoningStep } from "../../shared/contracts";
 import { SyntaxHighlightBlock } from "./syntax-highlight";
+import { LiveElapsed } from "./duration";
+import { formatMessageTime } from "./message-time";
 
 interface ReasoningTraceProps {
   data: ReasoningTraceData;
@@ -172,6 +174,19 @@ export function ReasoningTrace({
           fontWeight: "600",
           color: tokens.accent,
         },
+        statusTime: {
+          fontFamily: tokens.fontUi,
+          fontSize: tokens.fs(11),
+          fontWeight: "600",
+          fontVariant: ["tabular-nums"],
+          color: tokens.accent,
+        },
+        endTime: {
+          fontFamily: tokens.fontUi,
+          fontSize: tokens.fs(10),
+          fontVariant: ["tabular-nums"],
+          color: tokens.foregroundSubtle,
+        },
         body: {
           paddingHorizontal: 16,
           paddingTop: 12,
@@ -313,7 +328,14 @@ export function ReasoningTrace({
               <Text selectable style={styles.statusText}>
                 Reasoning
               </Text>
+              {data.startedAt !== undefined ? (
+                <LiveElapsed startedAt={data.startedAt} active style={styles.statusTime} />
+              ) : null}
             </View>
+          ) : data.endedAt !== undefined ? (
+            <Text selectable style={styles.endTime}>
+              {formatMessageTime(new Date(data.endedAt))}
+            </Text>
           ) : null}
           <Rotate active={isExpanded}>
             <Glyph name="ChevronDown" size={16} color={tokens.foregroundMuted} />

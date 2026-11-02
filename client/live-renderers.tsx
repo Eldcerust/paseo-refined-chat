@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { collapseKind } from "./tool-collapse";
 import { View } from "react-native";
 import { useAgent, usePaseo, useRpc } from "@getpaseo/plugin/client";
@@ -672,6 +672,7 @@ export function LiveToolCallRenderer({
 export function LiveReasoningRenderer({
   item,
   theme,
+  timestamp,
 }: PluginTimelineItemProps<LiveReasoningPayload>) {
   const preferences = useEnhancerPreferences();
   const tokens = useMemo(
@@ -682,6 +683,14 @@ export function LiveReasoningRenderer({
   usePointerGlow(preferences.pointerGlow);
   useFrostedGlass(preferences.frostedGlass);
   const data = item.data;
+  // The host updates a reasoning item's timestamp with every streamed chunk, so
+  // the first streaming render is the only moment its start is visible. Keep
+  // that instant for the finished card's duration and tick from it meanwhile.
+  const startedAt = useRef<number | null>(null);
+  if (data.phase === "streaming" && startedAt.current === null) {
+    startedAt.current = timestamp.getTime();
+  }
+  const endedAt = data.phase === "streaming" ? undefined : timestamp.getTime();
   // The host owns the reveal cadence, so streamed reasoning animates the same
   // way it does in the native timeline instead of appearing in whole blocks.
   const revealed = useRevealedText(
@@ -734,8 +743,13 @@ export function LiveReasoningRenderer({
     return {
       id: "live-reasoning",
       agentModel: "",
-      durationMs: 0,
+      durationMs:
+        startedAt.current !== null && endedAt !== undefined
+          ? Math.max(0, endedAt - startedAt.current)
+          : 0,
       totalTokens: Math.round(rawText.length / 4),
+      startedAt: startedAt.current ?? undefined,
+      endedAt,
       status: data.phase === "streaming" ? "thinking" : "completed",
       steps:
         steps.length > 0
@@ -750,7 +764,7 @@ export function LiveReasoningRenderer({
               },
             ],
     };
-  }, [data, revealed]);
+  }, [data, revealed, endedAt]);
 
   return (
     <View {...hostFontEscape}>

@@ -150,11 +150,11 @@ for, then folds them again when it closes. Text selection covers only the lines 
 
 | Card | What you get |
 | --- | --- |
-| **Shell and Git** | A terminal frame with Bash highlighting, exit code and duration. A running call ticks its elapsed time in the header once a second, and a finished call shows the gap as `4s`, `1m 12s` or `1h 5m`. The header also says what the command did: what git changed (`+53 −0`), how many lines it printed (`8 lines`), or `no output`. A failed call keeps its exit code. |
+| **Shell and Git** | A terminal frame with Bash highlighting, exit code and duration. A running call ticks its elapsed time in the header once a second; a finished call shows the gap as `4s`, `1m 12s` or `1h 5m` and the clock time it ended. The header also says what the command did: what git changed (`+53 −0`), how many lines it printed (`8 lines`), or `no output`. A failed call keeps its exit code. |
 | **Read** | The file's language logo, a path that is a link (shown relative to the working directory when the file lies inside it), line numbers (real ones when the read starts mid-file), a copy button, and how many lines came back. |
 | **Write and Edit** | Diffs with old and new line numbers, adjacent removed and added rows joined into one block, and the changed words highlighted. The header carries `+X −Y`. A failed call shows no count, and a failed edit labels its diff "Not applied". The path is a link, like on a read card. |
 | **Images** | The picture itself instead of an empty code block. See [Images](#images). |
-| **Reasoning** | Live thinking text, a token badge, numbered steps, a connected rail with per-step time. |
+| **Reasoning** | Live thinking text, a token badge, numbered steps, a connected rail with per-step time, a live count while thinking, then how long it took and the clock time it ended. |
 | **MCP** | Server badge, transport, input parameters and the response, each highlighted. |
 | **Eval** | One card per kernel cell: the source that ran, then what it printed. |
 | **Ask** | Option cards with the recommended badge, the chosen answer marked, and a typed reply labelled as typed. |
