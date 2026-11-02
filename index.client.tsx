@@ -12,8 +12,6 @@ import { installLinkStyle } from "./client/components/markdown/link-style";
 import { extractPromptImages } from "./client/prompt-images";
 import { getEnhancerPreferences } from "./client/preferences";
 import { yieldsToHost } from "./client/host-chat-display";
-import { isProseOnly } from "./client/components/markdown/prose-only";
-import { touchSelectionEnabled } from "./client/components/text-selection";
 import {
   LiveToolCallRenderer,
   LiveReasoningRenderer,
@@ -228,9 +226,6 @@ export default function contribute(client: PluginClientContext) {
       if (!getEnhancerPreferences().assistantMarkdown) return undefined;
       if (yieldsToHost("assistant_message")) return undefined;
       if (!item.text.trim()) return undefined;
-      // iOS cannot start a selection in text the plugin draws, and can in the
-      // host's. A reply of plain paragraphs loses nothing by going back to it.
-      if (touchSelectionEnabled && isProseOnly(item.text)) return undefined;
       return {
         items: [
           {
