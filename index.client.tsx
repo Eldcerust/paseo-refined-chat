@@ -14,6 +14,13 @@ import { getEnhancerPreferences } from "./client/preferences";
 import { noteRunningCall, readRunStart } from "./client/run-start";
 import { yieldsToHost } from "./client/host-chat-display";
 import {
+  isCardHidden,
+  noteCardStatus,
+  onHiddenChange,
+  reasoningCardId,
+  toolCardId,
+} from "./client/card-runs";
+import {
   LiveToolCallRenderer,
   LiveReasoningRenderer,
   LiveTodoRenderer,
@@ -24,6 +31,11 @@ import {
 } from "./client/live-renderers";
 
 type JsonValue = boolean | null | number | string | JsonValue[] | { [key: string]: JsonValue };
+
+/** True for a card a bar hid, while the bar setting is on. */
+function hiddenByBar(id: string): boolean {
+  return getEnhancerPreferences().cardRunBar && isCardHidden(id);
+}
 
 function toJsonValue(value: unknown): JsonValue {
   return value as JsonValue;
@@ -61,7 +73,9 @@ export default function contribute(client: PluginClientContext) {
   registerPanelOpener((id, options) => client.openPanel(id, options));
 
   // Live chat timeline interception: render real tool calls, reasoning, and todos with enhanced UI.
-  const removeToolTransformer = client.addTimelineTransformer({
+  // A bar over a run of cards hides the cards through these transformers. The
+  // host keeps what they returned per item, so a change registers them again.
+  const addToolTransformer = () => client.addTimelineTransformer({
     id: "omp-enhanced-tool-call",
     query: { itemType: "tool_call" },
     transform({ item, phase }) {
@@ -73,6 +87,14 @@ export default function contribute(client: PluginClientContext) {
       const callKey = item.callId ?? item.name;
       const startedAt =
         item.status === "running" ? noteRunningCall(callKey) : readRunStart(callKey);
+      const toolId = toolCardId(item.callId);
+      if (toolId && hiddenByBar(toolId)) {
+        noteCardStatus(
+          toolId,
+          item.status === "running" ? "running" : item.status === "failed" ? "failed" : "done",
+        );
+        return { items: [] };
+      }
       return {
         items: [
           {
@@ -93,6 +115,7 @@ export default function contribute(client: PluginClientContext) {
       };
     },
   });
+  let removeToolTransformer = addToolTransformer();
 
   const removeToolRenderer = client.addTimelineRenderer({
     kind: "omp-tool-call",
@@ -109,12 +132,17 @@ export default function contribute(client: PluginClientContext) {
     Component: LiveToolCallRenderer,
   });
 
-  const removeReasoningTransformer = client.addTimelineTransformer({
+  const addReasoningTransformer = () => client.addTimelineTransformer({
     id: "omp-enhanced-reasoning",
     query: { itemType: "reasoning" },
     transform({ item, phase }) {
       if (item.type !== "reasoning") return undefined;
       if (yieldsToHost("reasoning")) return undefined;
+      const reasoningId = reasoningCardId(item.text);
+      if (hiddenByBar(reasoningId)) {
+        noteCardStatus(reasoningId, phase === "streaming" ? "running" : "done");
+        return { items: [] };
+      }
       return {
         items: [
           {
@@ -129,6 +157,13 @@ export default function contribute(client: PluginClientContext) {
         ],
       };
     },
+  });
+  let removeReasoningTransformer = addReasoningTransformer();
+  const removeHiddenListener = onHiddenChange(() => {
+    removeToolTransformer();
+    removeToolTransformer = addToolTransformer();
+    removeReasoningTransformer();
+    removeReasoningTransformer = addReasoningTransformer();
   });
 
   const removeReasoningRenderer = client.addTimelineRenderer({
@@ -302,6 +337,7 @@ export default function contribute(client: PluginClientContext) {
     removeNoticeStyle();
     removeChatFind();
     removeLinkStyle();
+    removeHiddenListener();
     removeToolTransformer();
     removeToolRenderer();
     removeReasoningTransformer();

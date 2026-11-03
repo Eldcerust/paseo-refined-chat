@@ -11,7 +11,6 @@ import { ToolCallout } from "./components/tool-callouts";
 import { ReasoningTrace } from "./components/reasoning-trace";
 import { TaskList } from "./components/task-list";
 import { UserMessage } from "./components/user-message";
-import { hostFontEscape } from "./components/host-font-escape";
 import { promptRowAnchor } from "./components/prompt-anchor";
 import { surfaceProps } from "./components/view-props";
 import { useSelectionActions } from "./components/selection-actions";
@@ -30,6 +29,8 @@ import { AssistantFooter } from "./components/turn-footer";
 import { SystemCard } from "./components/system-card";
 import { parseSystemEnvelope } from "./system-envelope";
 import { useIsTimelineTail } from "./timeline-tail";
+import { itemKey as runItemKey, reasoningCardId, runRowProps, toolCardId, useRunMember, useRunView } from "./card-runs";
+import { RunBar } from "./components/run-bar";
 import type {
   ToolCalloutData,
   ToolCallKind,
@@ -380,6 +381,7 @@ export function LiveToolCallRenderer({
   usePointerGlow(preferences.pointerGlow);
   useFrostedGlass(preferences.frostedGlass);
   const data = item.data;
+  const runKey = `tool:${data.callId ?? data.name}:${timestamp.getTime()}`;
 
   const calloutData = useMemo((): ToolCalloutData => {
     const rawName = (data.name || "").toLowerCase();
@@ -611,6 +613,23 @@ export function LiveToolCallRenderer({
     preferences.startCollapsedKinds.includes(collapseKind(calloutData.tool));
   const isExpanded = (data.status === "failed" || data.status === "running") && !startsFolded;
 
+  useRunMember(
+    agentId,
+    runKey,
+    toolCardId(data.callId),
+    timestamp.getTime(),
+    {
+      kind: collapseKind(calloutData.tool),
+      status: calloutData.status === "completed" ? "done" : calloutData.status,
+    },
+    preferences.cardRunBar,
+  );
+  // A card still going stays drawn under the bar of its closed run.
+  const runClosed =
+    useRunView(agentId, runKey)?.closed === true &&
+    preferences.cardRunBar &&
+    calloutData.status !== "running";
+
   // The daemon side owns the shell, so revealing a file is one RPC. A path the
   // daemon cannot stat answers with an error the press simply ignores.
   const openPath = usePathOpener(cwd, workspaceId, preferences.pathOpens);
@@ -640,11 +659,21 @@ export function LiveToolCallRenderer({
   const finishedAt = data.status === "running" ? undefined : timestamp.getTime();
   if (finishedAt !== undefined) noteSectionEnd(agentId, finishedAt, "tool");
 
+  if (runClosed) {
+    return (
+      <View {...runRowProps(runKey)}>
+        <RunBar agentId={agentId} cardKey={runKey} enabled rule={preferences.cardRunCollapse} startCollapsed={preferences.startCollapsedKinds} tokens={tokens} />
+      </View>
+    );
+  }
+
   return (
-    <View {...hostFontEscape}>
+    <View {...runRowProps(runKey)}>
+      <RunBar agentId={agentId} cardKey={runKey} enabled={preferences.cardRunBar} rule={preferences.cardRunCollapse} startCollapsed={preferences.startCollapsedKinds} tokens={tokens} />
       <ToolCallout
         data={calloutData}
         tokens={tokens}
+        stateKey={preferences.cardRunBar ? runKey : undefined}
         defaultExpanded={isExpanded}
         autoCollapse={
           preferences.autoCollapseKinds.length > 0
@@ -682,6 +711,24 @@ export function LiveReasoningRenderer({
   timestamp,
 }: PluginTimelineItemProps<LiveReasoningPayload>) {
   const preferences = useEnhancerPreferences();
+  // Traces stamped in the same second share a timestamp, so a finished one is
+  // told apart by its text. A streaming one keeps a key that holds still.
+  const runKey =
+    item.data.phase === "streaming"
+      ? `reasoning:${timestamp.getTime()}`
+      : `${reasoningCardId(item.data.text)}:${timestamp.getTime()}`;
+  useRunMember(
+    agentId,
+    runKey,
+    reasoningCardId(item.data.text),
+    timestamp.getTime(),
+    { kind: "thinking", status: item.data.phase === "streaming" ? "running" : "done" },
+    preferences.cardRunBar,
+  );
+  const runClosed =
+    useRunView(agentId, runKey)?.closed === true &&
+    preferences.cardRunBar &&
+    item.data.phase !== "streaming";
   const tokens = useMemo(
     () => buildThemeTokens(theme.colors, preferences),
     [theme.colors, preferences],
@@ -779,11 +826,21 @@ export function LiveReasoningRenderer({
     };
   }, [data, revealed, endedAt, startedAt]);
 
+  if (runClosed) {
+    return (
+      <View {...runRowProps(runKey)}>
+        <RunBar agentId={agentId} cardKey={runKey} enabled rule={preferences.cardRunCollapse} startCollapsed={preferences.startCollapsedKinds} tokens={tokens} />
+      </View>
+    );
+  }
+
   return (
-    <View {...hostFontEscape}>
+    <View {...runRowProps(runKey)}>
+      <RunBar agentId={agentId} cardKey={runKey} enabled={preferences.cardRunBar} rule={preferences.cardRunCollapse} startCollapsed={preferences.startCollapsedKinds} tokens={tokens} />
       <ReasoningTrace
         data={reasoningData}
         tokens={tokens}
+        stateKey={preferences.cardRunBar ? runKey : undefined}
         defaultExpanded={
           !preferences.startCollapsedKinds.includes("thinking") && data.phase === "streaming"
         }
@@ -793,8 +850,21 @@ export function LiveReasoningRenderer({
   );
 }
 
-export function LiveTodoRenderer({ item, theme }: PluginTimelineItemProps<LiveTodoPayload>) {
+export function LiveTodoRenderer({
+  agentId,
+  item,
+  theme,
+  timestamp,
+}: PluginTimelineItemProps<LiveTodoPayload>) {
   const preferences = useEnhancerPreferences();
+  useRunMember(
+    agentId,
+    runItemKey("todo", JSON.stringify(item.data.items), timestamp.getTime()),
+    undefined,
+    timestamp.getTime(),
+    undefined,
+    preferences.cardRunBar,
+  );
   const tokens = useMemo(
     () => buildThemeTokens(theme.colors, preferences),
     [theme.colors, preferences],
@@ -825,7 +895,7 @@ export function LiveTodoRenderer({ item, theme }: PluginTimelineItemProps<LiveTo
   }, [data]);
 
   return (
-    <View {...hostFontEscape}>
+    <View {...runRowProps(runItemKey("todo", JSON.stringify(item.data.items), timestamp.getTime()))}>
       <TaskList data={taskListData} tokens={tokens} />
     </View>
   );
@@ -864,6 +934,8 @@ export function LiveAssistantRenderer({
   // where the host puts its own controls.
   const itemKey = `assistant:${timestamp.getTime()}`;
   const isTail = useIsTimelineTail(itemKey);
+  const runKey = runItemKey("assistant", item.data.text, timestamp.getTime());
+  useRunMember(agentId, runKey, undefined, timestamp.getTime(), undefined, preferences.cardRunBar);
 
   // The previous settled section is the start of this reply: the prompt for a
   // reply with no tools, or the last tool/reasoning card otherwise. That is
@@ -889,7 +961,7 @@ export function LiveAssistantRenderer({
   const handleRevealPath = usePathOpener(cwd, workspaceId, preferences.pathOpens);
 
   return (
-    <View {...hostFontEscape}>
+    <View {...runRowProps(runKey)}>
       {envelope ? (
         <SystemCard envelope={envelope} tokens={tokens} />
       ) : (
@@ -930,8 +1002,21 @@ export function LiveAssistantRenderer({
  * which reads as a different product beside the plugin's callouts. Both carry
  * only a level and a message, so the card is a badge plus that message.
  */
-export function LiveNoticeRenderer({ item, theme }: PluginTimelineItemProps<LiveNoticePayload>) {
+export function LiveNoticeRenderer({
+  agentId,
+  item,
+  theme,
+  timestamp,
+}: PluginTimelineItemProps<LiveNoticePayload>) {
   const preferences = useEnhancerPreferences();
+  useRunMember(
+    agentId,
+    runItemKey("notice", item.data.message, timestamp.getTime()),
+    undefined,
+    timestamp.getTime(),
+    undefined,
+    preferences.cardRunBar,
+  );
   const tokens = useMemo(
     () => buildThemeTokens(theme.colors, preferences),
     [theme.colors, preferences],
@@ -953,7 +1038,7 @@ export function LiveNoticeRenderer({ item, theme }: PluginTimelineItemProps<Live
   );
 
   return (
-    <View {...hostFontEscape}>
+    <View {...runRowProps(runItemKey("notice", item.data.message, timestamp.getTime()))}>
       <NoticeCallout data={noticeData} tokens={tokens} />
     </View>
   );
@@ -988,6 +1073,14 @@ export function LiveUserMessageRenderer({
   useSelectionActions(tokens, preferences.selectionActions);
   usePointerGlow(preferences.pointerGlow);
   useFrostedGlass(preferences.frostedGlass);
+  useRunMember(
+    agentId,
+    runItemKey("user", item.data.text, timestamp.getTime()),
+    undefined,
+    timestamp.getTime(),
+    undefined,
+    preferences.cardRunBar,
+  );
   const paseo = usePaseo();
   const handle = useMemo(() => paseo.agents.ref(agentId), [paseo, agentId]);
 
@@ -1033,7 +1126,7 @@ export function LiveUserMessageRenderer({
   noteSectionEnd(agentId, timestamp.getTime(), "user");
 
   return (
-    <View {...surfaceProps(hostFontEscape, promptRowAnchor(item.data.messageId))}>
+    <View {...surfaceProps(runRowProps(runItemKey("user", item.data.text, timestamp.getTime())), promptRowAnchor(item.data.messageId))}>
       {envelope ? (
         <SystemCard envelope={envelope} tokens={tokens} />
       ) : (
