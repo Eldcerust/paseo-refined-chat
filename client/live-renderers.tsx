@@ -399,7 +399,33 @@ export function LiveToolCallRenderer({
             ? detail.args
             : {}
     ) as Record<string, unknown>;
-    const output = detail.output ?? detail.result ?? detail.content ?? "";
+    // A web search can answer with result records or annotations rather than
+    // one text block (Claude does; opencode's websearch puts its text in
+    // `output`). Fold both shapes into the same readable text.
+    const webResults = Array.isArray(detail.webResults)
+      ? detail.webResults.flatMap((entry) => {
+          if (!entry || typeof entry !== "object") return [];
+          const record = entry as Record<string, unknown>;
+          const title = asString(record.title);
+          const url = asString(record.url);
+          return title && url ? [`${title}\n${url}`] : title ? [title] : url ? [url] : [];
+        })
+      : [];
+    const annotations = Array.isArray(detail.annotations)
+      ? detail.annotations.filter((value): value is string => typeof value === "string")
+      : [];
+    const searchFiles = Array.isArray(detail.filePaths)
+      ? detail.filePaths.filter((value): value is string => typeof value === "string")
+      : [];
+    const searchText =
+      webResults.length > 0
+        ? webResults.join("\n\n")
+        : annotations.length > 0
+          ? annotations.join("\n\n")
+          : searchFiles.length > 0
+            ? searchFiles.join("\n")
+            : "";
+    const output = detail.output ?? detail.result ?? detail.content ?? searchText;
 
     // Universal path extraction across OMP, Paseo, Claude, and Codex formats
     const filePath: string | undefined =
