@@ -104,6 +104,11 @@ Use a project that holds a Markdown file with a heading, a link to another file 
 - Start a shell command that takes a few seconds (for example `Start-Sleep 8`
   in PowerShell or `sleep 8` in Bash). Its card shows a count that advances once
   a second while it runs, then settles on a readable duration such as `8s`.
+- A completed tool card starts open and shows its output: run a command that
+  prints several lines, and a web search. The shell card's body holds the
+  command output; the web search card is titled `Search: <query>` and holds the
+  result text. Set a kind under "Cards that start collapsed" to fold it again,
+  or "Collapse when finished" to fold it once it completes.
 - Let a command run past a minute and check the label becomes `1m 5s`; a call
   under a second reads `<1s`. A card loaded from history without a recorded
   start keeps the provider's duration when one was sent, and otherwise shows no

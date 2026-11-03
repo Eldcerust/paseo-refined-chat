@@ -415,6 +415,13 @@ export function LiveToolCallRenderer({
       (typeof input.command === "string" ? input.command : undefined) ||
       (typeof detail.input === "string" ? detail.input : undefined);
 
+    // Search tools put their query in the input. opencode's `websearch` arrives
+    // as `type: "unknown"` but keeps the query and the result text in `output`.
+    const query =
+      (typeof input.query === "string" ? input.query.trim() : "") ||
+      (typeof detail.query === "string" ? detail.query.trim() : "") ||
+      undefined;
+
     // Universal code / file content extraction
     const code: string | undefined =
       (typeof detail.content === "string" ? detail.content : undefined) ||
@@ -546,6 +553,12 @@ export function LiveToolCallRenderer({
       const count = subagent?.agents.length ?? 0;
       title =
         count === 1 ? (subagent?.agents[0]?.name ?? "Subagent") : `${count || "No"} subagents`;
+    } else if (query && (detailType === "search" || detailType === "unknown")) {
+      // A search result has no command to run. Keeping it as a shell card would
+      // title it with the tool name and leave the query out of the header; the
+      // result text still renders through the same body.
+      toolKind = "bash";
+      title = `Search: ${query}`;
     }
 
     const exitCodeCandidate =
@@ -604,14 +617,16 @@ export function LiveToolCallRenderer({
     });
   }, [hubData, agentId]);
 
-  // Collapse completed tools by default; expand active or failed tools. A kind
-  // the reader chose to start folded stays folded while it runs and when it
-  // fails: they asked for it closed. An ask card holds a question, so it never
-  // starts folded.
+  // A card starts open unless the reader asked this kind to start folded. An
+  // ask card holds a question, so it never starts folded. The auto-collapse
+  // effect below folds a finished card when that preference is set.
   const startsFolded =
     calloutData.tool !== "ask" &&
     preferences.startCollapsedKinds.includes(collapseKind(calloutData.tool));
-  const isExpanded = (data.status === "failed" || data.status === "running") && !startsFolded;
+  // Start open unless the reader asked this kind to start folded. "Collapse
+  // when finished" is handled by the auto-collapse effect below; folding every
+  // completed card up front hid shell and search output behind a click.
+  const isExpanded = !startsFolded;
 
   useRunMember(
     agentId,
