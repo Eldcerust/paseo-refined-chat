@@ -28,7 +28,7 @@ import type { ToolCalloutData } from "../../shared/contracts";
 import { lineSelector } from "../../shared/file-rpc";
 import { displayPath } from "../file-link";
 import { sameAnswer } from "../ask-question";
-import { shouldAutoCollapse } from "../tool-collapse";
+import { hasAskAnswers, shouldAutoCollapse } from "../tool-collapse";
 import type { AutoCollapseRules } from "../tool-collapse";
 
 /** Lines in a block of text, ignoring the newline that ends the last one. */
@@ -162,22 +162,26 @@ export function ToolCallout({
   const codeLimit = isRunning ? 0 : codeMaxLines;
 
   // A user who pressed the card owns its state from then on; auto-collapse
-  // only ever folds a card nobody has touched. An ask card carries the
-  // agent's question and its options, so it never folds on its own.
+  // only ever folds a card nobody has touched.
   const toggleExpanded = useCallback(() => {
     setTouched(true);
     setExpanded((previous) => !previous);
   }, []);
 
   const previousStatus = useRef(data.status);
+  const answered = data.tool === "ask" && hasAskAnswers(data);
+  const previouslyAnswered = useRef(answered);
   useEffect(() => {
     const wasRunning = previousStatus.current === "running";
+    // Codex reports a completed tool before the user answers its async question.
+    const justAnswered = answered && !previouslyAnswered.current;
     previousStatus.current = data.status;
+    previouslyAnswered.current = answered;
     if (touched) return;
-    if (autoCollapse && wasRunning && shouldAutoCollapse(data, autoCollapse)) {
+    if (autoCollapse && (wasRunning || justAnswered) && shouldAutoCollapse(data, autoCollapse)) {
       setExpanded(false);
     }
-  }, [autoCollapse, touched, data]);
+  }, [autoCollapse, touched, data, answered]);
 
   // Only a real shell call can "complete without output". A git op or an
   // unmapped tool that prints nothing is not a silent command, so neither

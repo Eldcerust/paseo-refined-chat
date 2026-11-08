@@ -25,6 +25,31 @@ export function isAskReply(message: string, transcript: string): boolean {
   return body !== "" && normalized.startsWith(prefix) && normalized.slice(prefix.length) === body;
 }
 
+/** Use known question boundaries, preserving options and multiline typed replies. */
+export function answerCodexQuestions(questions: AskQuestionData[], transcript: string): AskQuestionData[] {
+  const text = transcript.replace(/\r\n/g, "\n").trim();
+  const initial = questions.map(q => [q.question, q.options.map(o => o.label).join(", ")]
+    .filter(Boolean).join("\n")).join("\n\n");
+  if (text === initial) return questions;
+  let rest = text;
+  const result: AskQuestionData[] = [];
+  for (let index = 0; index < questions.length; index++) {
+    const question = questions[index]!;
+    const prefix = `${question.question}\n`;
+    if (!rest.startsWith(prefix)) return [];
+    rest = rest.slice(prefix.length);
+    const next = questions[index + 1];
+    const boundary = next ? `\n\n${next.question}\n` : undefined;
+    const end = boundary ? rest.indexOf(boundary) : rest.length;
+    if (end < 0 || (boundary && rest.indexOf(boundary, end + 1) !== -1)) return [];
+    const answer = rest.slice(0, end);
+    if (!answer.trim()) return [];
+    result.push({ ...question, answers: [answer] });
+    if (next) rest = rest.slice(end + 2);
+  }
+  return result;
+}
+
 /** Pair only matching paragraph headings; never infer options by splitting commas. */
 export function pairAskTranscripts(before: string, after: string): AskQuestionData[] {
   if (before === after) return [];

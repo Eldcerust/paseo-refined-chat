@@ -12,7 +12,7 @@ import { installLinkStyle } from "./client/components/markdown/link-style";
 import { extractPromptImages } from "./client/prompt-images";
 import { attachRemotePreferences, getEnhancerPreferences } from "./client/preferences";
 import { yieldsToHost } from "./client/host-chat-display";
-import { isHiddenCodexReply, onCodexAskChange } from "./client/codex-ask";
+import { attachQuestionArchive, captureCodexQuestions, isHiddenCodexReply, noteCodexAskProjection, onCodexAskChange } from "./client/codex-ask";
 import {
   isCardHidden,
   noteCardStatus,
@@ -42,6 +42,10 @@ function toJsonValue(value: unknown): JsonValue {
 }
 
 export default function contribute(client: PluginClientContext) {
+  const stopQuestionArchive = attachQuestionArchive(client.rpc);
+  const stopQuestionCapture = client.paseo.agents.subscribe(update => {
+    if (update.kind === "upsert") captureCodexQuestions(update.agent.id, update.agent.pendingPermissions);
+  });
   // Android has no browser storage: its settings live on the daemon.
   const removeRemotePreferences = attachRemotePreferences(client.rpc);
   // Install the bundled faces before any surface paints.
@@ -137,6 +141,7 @@ export default function contribute(client: PluginClientContext) {
     transform({ item, phase }) {
       if (item.type !== "tool_call") return undefined;
       if (yieldsToHost("tool_call")) return undefined;
+      noteCodexAskProjection(item.callId, item.name, item.detail);
       const toolId = toolCardId(item.callId);
       if (toolId && hiddenByBar(toolId)) {
         noteCardStatus(
@@ -391,6 +396,8 @@ export default function contribute(client: PluginClientContext) {
   });
 
   return () => {
+    stopQuestionCapture();
+    stopQuestionArchive();
     registerPanelOpener(null);
     removeRemotePreferences();
     removeSettingsCommand();

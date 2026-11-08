@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { collapseKind } from "./tool-collapse";
+import { collapseKind, startsExpanded } from "./tool-collapse";
 import { View } from "react-native";
 import { useAgent, usePaseo, useRpc } from "@getpaseo/plugin/client";
 import { useRevealedText } from "@getpaseo/plugin/client/react-native";
@@ -612,14 +612,7 @@ export function LiveToolCallRenderer({
     });
   }, [hubData, agentId]);
 
-  // Collapse completed tools by default; expand active or failed tools. A kind
-  // the reader chose to start folded stays folded while it runs and when it
-  // fails: they asked for it closed. An ask card holds a question, so it never
-  // starts folded.
-  const startsFolded =
-    calloutData.tool !== "ask" &&
-    preferences.startCollapsedKinds.includes(collapseKind(calloutData.tool));
-  const isExpanded = (data.status === "failed" || data.status === "running") && !startsFolded;
+  const isExpanded = startsExpanded(calloutData, preferences.startCollapsedKinds);
 
   useRunMember(
     agentId,

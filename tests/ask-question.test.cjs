@@ -10,7 +10,22 @@ const compiled = ts.transpileModule(source, {
 }).outputText;
 const loaded = { exports: {} };
 new Function("exports", "require", "module", compiled)(loaded.exports, require, loaded);
-const { isAskTool, parseAskQuestions, applyAnswers, askTranscript, pairAskTranscripts, isAskReply } = loaded.exports;
+const { isAskTool, parseAskQuestions, applyAnswers, askTranscript, pairAskTranscripts, isAskReply, answerCodexQuestions } = loaded.exports;
+
+test("Captured Codex options survive answers, including commas and multiline free text", () => {
+  const questions = parseAskQuestions({ questions: [
+    { question: "Colour?", options: [{ label: "Green, blue" }, { label: "Purple" }] },
+    { question: "Reply?", options: [] },
+  ] });
+  const initial = "Colour?\nGreen, blue, Purple\n\nReply?";
+  assert.deepEqual(answerCodexQuestions(questions, initial), questions);
+  const result = answerCodexQuestions(questions, "Colour?\nGreen, blue\n\nReply?\nFirst line\n\nSecond paragraph");
+  assert.deepEqual(result.map(q => q.answers), [["Green, blue"], ["First line\n\nSecond paragraph"]]);
+  assert.deepEqual(result[0].options, questions[0].options);
+  assert.deepEqual(questions.map(q => q.answers), [[], []]);
+  assert.deepEqual(answerCodexQuestions(questions, "Different?\nAnswer"), []);
+  assert.deepEqual(answerCodexQuestions(questions, "Colour?\nPurple\n\nReply?"), []);
+});
 
 test("Only an exact complete answer envelope duplicates the card", () => {
   const transcript = "Colour?\nGreen\n\nReply?\nHello, world";
