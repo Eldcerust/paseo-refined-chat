@@ -12,6 +12,7 @@ import { installLinkStyle } from "./client/components/markdown/link-style";
 import { extractPromptImages } from "./client/prompt-images";
 import { attachRemotePreferences, getEnhancerPreferences } from "./client/preferences";
 import { yieldsToHost } from "./client/host-chat-display";
+import { isHiddenCodexReply, onCodexAskChange } from "./client/codex-ask";
 import {
   isCardHidden,
   noteCardStatus,
@@ -254,7 +255,7 @@ export default function contribute(client: PluginClientContext) {
     Component: LiveTodoRenderer,
   });
 
-  const removeUserTransformer = client.addTimelineTransformer({
+  const addUserTransformer = () => client.addTimelineTransformer({
     id: "omp-enhanced-user-message",
     query: { itemType: "user_message" },
     transform({ item }) {
@@ -268,6 +269,7 @@ export default function contribute(client: PluginClientContext) {
       // Replacing the item drops whatever this renderer does not carry, so a
       // message with an attachment it cannot show is left to the host.
       if (images.hasUnrenderable) return undefined;
+      if (images.uris.length === 0 && isHiddenCodexReply(item.messageId, item.text)) return { items: [] };
       // A prompt with no text is a pasted image and nothing else. The host
       // withholds the image from the plugin, so there is nothing here to draw:
       // an empty bubble would replace the screenshot with a blank. The host's
@@ -293,6 +295,20 @@ export default function contribute(client: PluginClientContext) {
         ],
       };
     },
+  });
+
+  let removeUserTransformer = addUserTransformer();
+  let userRefreshQueued = false;
+  let userTransformerStopped = false;
+  const removeAskListener = onCodexAskChange(() => {
+    if (userRefreshQueued || userTransformerStopped) return;
+    userRefreshQueued = true;
+    queueMicrotask(() => {
+      userRefreshQueued = false;
+      if (userTransformerStopped) return;
+      removeUserTransformer();
+      removeUserTransformer = addUserTransformer();
+    });
   });
 
   const removeUserRenderer = client.addTimelineRenderer({
@@ -398,6 +414,8 @@ export default function contribute(client: PluginClientContext) {
     removeReasoningRenderer();
     removeTodoTransformer();
     removeTodoRenderer();
+    userTransformerStopped = true;
+    removeAskListener();
     removeUserTransformer();
     removeUserRenderer();
     removeAssistantTransformer();

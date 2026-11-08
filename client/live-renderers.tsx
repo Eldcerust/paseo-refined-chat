@@ -45,7 +45,8 @@ import type {
   GitHubToolData,
   AskQuestionData,
 } from "../shared/contracts";
-import { applyAnswers, isAskTool, parseAskQuestions } from "./ask-question";
+import { applyAnswers, askTranscript, isAskTool, parseAskQuestions } from "./ask-question";
+import { noteCodexAskReply, useCodexAsk, useIsCodexAskReply } from "./codex-ask";
 import { fileKindRpc, revealPathRpc } from "../shared/file-rpc";
 import { buildGitHubData } from "./github-request";
 import { useImageFile } from "./image-file";
@@ -378,6 +379,13 @@ export function LiveToolCallRenderer({
   usePointerGlow(preferences.pointerGlow);
   useFrostedGlass(preferences.frostedGlass);
   const data = item.data;
+  const codexAsk = useCodexAsk(
+    agentId,
+    data.callId,
+    timestamp.getTime(),
+    data.name.toLowerCase() === "request_user_input_async" && data.detail?.type === "plain_text"
+      && typeof data.detail.text === "string" ? data.detail.text : undefined,
+  );
   const runKey = `tool:${data.callId ?? data.name}:${timestamp.getTime()}`;
 
   const calloutData = useMemo((): ToolCalloutData => {
@@ -525,6 +533,7 @@ export function LiveToolCallRenderer({
     } else if (isAskTool(rawName)) {
       toolKind = "ask";
       askQuestions = applyAnswers(parseAskQuestions(input), [detail, output], outputText);
+      if (!askQuestions.length && codexAsk.questions.length) askQuestions = codexAsk.questions;
       const first = askQuestions[0];
       const lead = first?.question || first?.header || "User Decision";
       title = askQuestions.length > 1 ? `${lead} (+${askQuestions.length - 1} more)` : lead;
@@ -572,9 +581,11 @@ export function LiveToolCallRenderer({
       diff,
       diffComputed: !providerDiff && computedEditDiff !== undefined ? true : undefined,
       editNewText: !providerDiff && computedEditDiff !== undefined ? editNew : undefined,
-      output: toolKind === "github" || evalCells.length > 0 ? undefined : outputText || errorText,
+      output: toolKind === "github" || evalCells.length > 0 ? undefined :
+        (toolKind === "ask" ? codexAsk.transcript || askTranscript(detail, outputText) : outputText) || errorText,
       cells: evalCells.length > 0 ? evalCells : undefined,
       askQuestions: askQuestions.length > 0 ? askQuestions : undefined,
+      askTranscript: askQuestions.length === 0 ? codexAsk.transcript : undefined,
       // The first question, for the code that predates several per call.
       askOptions: askQuestions[0]?.options.length ? askQuestions[0].options : undefined,
       askAnswer: askQuestions[0]?.answers.length ? askQuestions[0].answers : undefined,
@@ -586,7 +597,7 @@ export function LiveToolCallRenderer({
       paseo,
       github,
     };
-  }, [data]);
+  }, [data, codexAsk.questions, codexAsk.transcript]);
 
   // The dock has no access to the job manager, so the timeline is its only
   // source: every job snapshot that passes through a card is republished, and
@@ -619,7 +630,7 @@ export function LiveToolCallRenderer({
       kind: collapseKind(calloutData.tool),
       status: calloutData.status === "completed" ? "done" : calloutData.status,
     },
-    preferences.cardRunBar,
+    preferences.cardRunBar && !codexAsk.hidden,
   );
   // A card still going stays drawn under the bar of its closed run.
   const runClosed =
@@ -650,6 +661,8 @@ export function LiveToolCallRenderer({
     calloutData.tool === "read" || calloutData.tool === "write" ? calloutData.filePath : undefined,
     cwd,
   );
+
+  if (codexAsk.hidden) return null;
 
   if (runClosed) {
     return (
@@ -1010,6 +1023,11 @@ export function LiveUserMessageRenderer({
   timestamp,
 }: PluginTimelineItemProps<LiveUserMessagePayload>) {
   const preferences = useEnhancerPreferences();
+  const matchesAsk = useIsCodexAskReply(agentId, item.data.text);
+  const hiddenAskReply = matchesAsk && !item.data.images?.length;
+  useEffect(() => {
+    if (hiddenAskReply) noteCodexAskReply(agentId, item.data.messageId, item.data.text);
+  }, [hiddenAskReply, agentId, item.data.messageId, item.data.text]);
   const tokens = useMemo(
     () => buildThemeTokens(theme.colors, preferences),
     [theme.colors, preferences],
@@ -1023,7 +1041,7 @@ export function LiveUserMessageRenderer({
     undefined,
     timestamp.getTime(),
     undefined,
-    preferences.cardRunBar,
+    preferences.cardRunBar && !hiddenAskReply,
   );
   const paseo = usePaseo();
   const handle = useMemo(() => paseo.agents.ref(agentId), [paseo, agentId]);
@@ -1065,6 +1083,8 @@ export function LiveUserMessageRenderer({
   // replay. A job result is not something the user said, so it never takes the
   // user bubble.
   const envelope = useMemo(() => parseSystemEnvelope(item.data.text), [item.data.text]);
+
+  if (hiddenAskReply) return null;
 
   return (
     <View {...surfaceProps(runRowProps(runItemKey("user", item.data.text, timestamp.getTime())), promptRowAnchor(item.data.messageId))}>

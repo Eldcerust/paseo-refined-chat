@@ -127,7 +127,7 @@ export function ToolCallout({
     data.tool === "edit" ||
     data.tool === "eval" ||
     (data.tool === "mcp" && Boolean(data.mcp)) ||
-    (data.tool === "ask" && Boolean(data.askQuestions?.length)) ||
+    (data.tool === "ask" && Boolean(data.askQuestions?.length || data.askTranscript)) ||
     (data.tool === "task" && Boolean(data.subagent)) ||
     (data.tool === "hub" && Boolean(data.hub)) ||
     (data.tool === "paseo" && Boolean(data.paseo));
@@ -1024,6 +1024,24 @@ export function ToolCallout({
                   ) : null}
                 </View>
               ))}
+            </View>
+          )}
+
+          {data.tool === "ask" && !askQuestions.length && data.askTranscript && (
+            <View style={styles.askContainer}>
+              {data.askTranscript.split(/\n\s*\n/).map((paragraph, index) => {
+                const [heading, ...body] = paragraph.split("\n");
+                return (
+                  <View key={index} style={index > 0 ? styles.askQuestionGap : undefined}>
+                    <Text selectable style={styles.askQuestionText}>{heading}</Text>
+                    {body.length > 0 && (
+                      <View style={styles.askOptionCard}>
+                        <Text selectable style={styles.askAnswerValue}>{body.join("\n")}</Text>
+                      </View>
+                    )}
+                  </View>
+                );
+              })}
             </View>
           )}
 
