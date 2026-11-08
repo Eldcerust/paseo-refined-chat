@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { collapseKind } from "./tool-collapse";
 import { View } from "react-native";
 import { useAgent, usePaseo, useRpc } from "@getpaseo/plugin/client";
@@ -43,13 +43,16 @@ import type {
   NoticeCalloutData,
   PaseoToolData,
   GitHubToolData,
+  AskQuestionData,
 } from "../shared/contracts";
+import { applyAnswers, isAskTool, parseAskQuestions } from "./ask-question";
 import { fileKindRpc, revealPathRpc } from "../shared/file-rpc";
 import { buildGitHubData } from "./github-request";
 import { useImageFile } from "./image-file";
 import { useEditAnchor } from "./edit-anchor";
 import { classifyShellTool } from "./tool-kind";
 import { extractToolText } from "./tool-text";
+import { noteSectionEnd, previousSectionEnd } from "./section-times";
 
 type JsonValue = boolean | null | number | string | JsonValue[] | { [key: string]: JsonValue };
 
@@ -62,6 +65,8 @@ export interface LiveToolCallPayload {
   status: string;
   detail?: Record<string, unknown>;
   callId?: string;
+  /** Epoch milliseconds the call was first seen running. */
+  startedAt?: number;
   error?: string | null;
   phase?: string;
 }
@@ -278,93 +283,6 @@ export function buildPaseoData(
   };
 }
 
-interface AskOption {
-  id: string;
-  label: string;
-  description?: string;
-  recommended?: boolean;
-}
-
-/**
- * The ask tool nests its prompt under `questions`, so reading `input.question`
- * finds nothing and the options never reach the callout.
- */
-export function extractAskQuestion(input: Record<string, unknown>): {
-  question: string;
-  options: AskOption[];
-} | null {
-  const raw = Array.isArray(input.questions)
-    ? (input.questions[0] as Record<string, unknown> | undefined)
-    : typeof input.question === "string"
-      ? input
-      : undefined;
-  if (!raw) return null;
-
-  const question = typeof raw.question === "string" ? raw.question : "";
-  const recommended = typeof raw.recommended === "number" ? raw.recommended : undefined;
-  const options = Array.isArray(raw.options)
-    ? raw.options.flatMap((entry, index): AskOption[] => {
-        if (!entry || typeof entry !== "object") return [];
-        const option = entry as Record<string, unknown>;
-        const label = typeof option.label === "string" ? option.label : "";
-        if (!label) return [];
-        return [
-          {
-            id: typeof option.id === "string" ? option.id : `opt-${index}`,
-            label,
-            description: typeof option.description === "string" ? option.description : undefined,
-            recommended: index === recommended,
-          },
-        ];
-      })
-    : [];
-
-  if (!question && options.length === 0) return null;
-  return { question, options };
-}
-
-/**
- * The chosen answer is reported as prose, so the prefix is stripped and the
- * remainder kept verbatim — it may be a typed reply rather than a label.
- */
-export function extractAskAnswer(text?: string): string | undefined {
-  if (!text) return undefined;
-  const trimmed = text.trim();
-  if (!trimmed) return undefined;
-  const match = trimmed.match(/^user\s+(?:selected|answered|chose)\s*:?\s*/i);
-  const answer = match ? trimmed.slice(match[0].length).trim() : trimmed;
-  return answer.length > 0 ? answer : undefined;
-}
-
-/**
- * The selected option labels.
- *
- * The ask result nests its answer, so reading the top level yields the whole
- * JSON object where the choice should be. `details.selectedOptions` is the
- * authoritative list and covers multi-select; the prose line is the fallback
- * for a host that does not report it. A typed reply arrives here too, and
- * matches no option label, which is exactly how free text should behave.
- */
-export function extractAskSelections(output: unknown, outputText?: string): string[] {
-  const container =
-    output && typeof output === "object" ? (output as Record<string, unknown>) : undefined;
-
-  const details = container?.details;
-  if (details && typeof details === "object") {
-    const selected = (details as Record<string, unknown>).selectedOptions;
-    if (Array.isArray(selected)) {
-      const labels = selected.filter(
-        (entry): entry is string => typeof entry === "string" && entry.length > 0,
-      );
-      if (labels.length > 0) return labels;
-    }
-  }
-
-  const prose = container ? extractContentText(container) : outputText;
-  const single = extractAskAnswer(prose);
-  return single ? [single] : [];
-}
-
 /** Extension to the language ids the highlighter and the devicons share. */
 const LANGUAGE_BY_EXTENSION: Record<string, string> = {
   ts: "typescript",
@@ -481,7 +399,33 @@ export function LiveToolCallRenderer({
             ? detail.args
             : {}
     ) as Record<string, unknown>;
-    const output = detail.output ?? detail.result ?? detail.content ?? "";
+    // A web search can answer with result records or annotations rather than
+    // one text block (Claude does; opencode's websearch puts its text in
+    // `output`). Fold both shapes into the same readable text.
+    const webResults = Array.isArray(detail.webResults)
+      ? detail.webResults.flatMap((entry) => {
+          if (!entry || typeof entry !== "object") return [];
+          const record = entry as Record<string, unknown>;
+          const title = asString(record.title);
+          const url = asString(record.url);
+          return title && url ? [`${title}\n${url}`] : title ? [title] : url ? [url] : [];
+        })
+      : [];
+    const annotations = Array.isArray(detail.annotations)
+      ? detail.annotations.filter((value): value is string => typeof value === "string")
+      : [];
+    const searchFiles = Array.isArray(detail.filePaths)
+      ? detail.filePaths.filter((value): value is string => typeof value === "string")
+      : [];
+    const searchText =
+      webResults.length > 0
+        ? webResults.join("\n\n")
+        : annotations.length > 0
+          ? annotations.join("\n\n")
+          : searchFiles.length > 0
+            ? searchFiles.join("\n")
+            : "";
+    const output = detail.output ?? detail.result ?? detail.content ?? searchText;
 
     // Universal path extraction across OMP, Paseo, Claude, and Codex formats
     const filePath: string | undefined =
@@ -496,6 +440,13 @@ export function LiveToolCallRenderer({
       (typeof detail.command === "string" ? detail.command : undefined) ||
       (typeof input.command === "string" ? input.command : undefined) ||
       (typeof detail.input === "string" ? detail.input : undefined);
+
+    // Search tools put their query in the input. opencode's `websearch` arrives
+    // as `type: "unknown"` but keeps the query and the result text in `output`.
+    const query =
+      (typeof input.query === "string" ? input.query.trim() : "") ||
+      (typeof detail.query === "string" ? detail.query.trim() : "") ||
+      undefined;
 
     // Universal code / file content extraction
     const code: string | undefined =
@@ -551,8 +502,7 @@ export function LiveToolCallRenderer({
     let paseo: PaseoToolData | undefined;
     let github: GitHubToolData | undefined;
     let evalCells: EvalCell[] = [];
-    let askOptions: AskOption[] = [];
-    let askAnswer: string[] = [];
+    let askQuestions: AskQuestionData[] = [];
     let title = data.name || "tool";
 
     const isGitHubTool =
@@ -608,12 +558,12 @@ export function LiveToolCallRenderer({
       toolKind = "mcp";
       title = rawName.replace(/^mcp__/, "").replace(/__/g, " / ");
       mcp = buildMcpData(rawName, input, output, durationMs);
-    } else if (rawName === "ask") {
+    } else if (isAskTool(rawName)) {
       toolKind = "ask";
-      const asked = extractAskQuestion(input);
-      title = asked?.question || "User Decision";
-      askOptions = asked?.options ?? [];
-      askAnswer = extractAskSelections(output, outputText);
+      askQuestions = applyAnswers(parseAskQuestions(input), [detail, output], outputText);
+      const first = askQuestions[0];
+      const lead = first?.question || first?.header || "User Decision";
+      title = askQuestions.length > 1 ? `${lead} (+${askQuestions.length - 1} more)` : lead;
     } else if (rawName === "hub") {
       toolKind = "hub";
       title = `Hub: ${String(input.op || "operation")}`;
@@ -629,6 +579,12 @@ export function LiveToolCallRenderer({
       const count = subagent?.agents.length ?? 0;
       title =
         count === 1 ? (subagent?.agents[0]?.name ?? "Subagent") : `${count || "No"} subagents`;
+    } else if (query && (detailType === "search" || detailType === "unknown")) {
+      // A search result has no command to run. Keeping it as a shell card would
+      // title it with the tool name and leave the query out of the header; the
+      // result text still renders through the same body.
+      toolKind = "bash";
+      title = `Search: ${query}`;
     }
 
     const exitCodeCandidate =
@@ -660,8 +616,10 @@ export function LiveToolCallRenderer({
       editNewText: !providerDiff && computedEditDiff !== undefined ? editNew : undefined,
       output: toolKind === "github" || evalCells.length > 0 ? undefined : outputText || errorText,
       cells: evalCells.length > 0 ? evalCells : undefined,
-      askOptions: askOptions.length > 0 ? askOptions : undefined,
-      askAnswer: askAnswer.length > 0 ? askAnswer : undefined,
+      askQuestions: askQuestions.length > 0 ? askQuestions : undefined,
+      // The first question, for the code that predates several per call.
+      askOptions: askQuestions[0]?.options.length ? askQuestions[0].options : undefined,
+      askAnswer: askQuestions[0]?.answers.length ? askQuestions[0].answers : undefined,
       exitCode: exitCodeCandidate,
       durationMs,
       hub,
@@ -685,14 +643,16 @@ export function LiveToolCallRenderer({
     });
   }, [hubData, agentId]);
 
-  // Collapse completed tools by default; expand active or failed tools. A kind
-  // the reader chose to start folded stays folded while it runs and when it
-  // fails: they asked for it closed. An ask card holds a question, so it never
-  // starts folded.
+  // A card starts open unless the reader asked this kind to start folded. An
+  // ask card holds a question, so it never starts folded. The auto-collapse
+  // effect below folds a finished card when that preference is set.
   const startsFolded =
     calloutData.tool !== "ask" &&
     preferences.startCollapsedKinds.includes(collapseKind(calloutData.tool));
-  const isExpanded = (data.status === "failed" || data.status === "running") && !startsFolded;
+  // Start open unless the reader asked this kind to start folded. "Collapse
+  // when finished" is handled by the auto-collapse effect below; folding every
+  // completed card up front hid shell and search output behind a click.
+  const isExpanded = !startsFolded;
 
   useRunMember(
     agentId,
@@ -735,6 +695,11 @@ export function LiveToolCallRenderer({
     cwd,
   );
 
+  // A settled tool is the end of a section; a reasoning card or reply that
+  // follows can measure its elapsed time from here.
+  const finishedAt = data.status === "running" ? undefined : timestamp.getTime();
+  if (finishedAt !== undefined) noteSectionEnd(agentId, finishedAt, "tool");
+
   if (runClosed) {
     return (
       <View {...runRowProps(runKey)}>
@@ -762,6 +727,12 @@ export function LiveToolCallRenderer({
         cwd={cwd}
         shellMaxLines={preferences.shellMaxLines}
         codeMaxLines={preferences.codeMaxLines}
+        startedAt={
+          data.status === "running"
+            ? Math.min(data.startedAt ?? Number.POSITIVE_INFINITY, timestamp.getTime())
+            : data.startedAt
+        }
+        finishedAt={finishedAt}
       />
       <TimelineTailHub
         agentId={agentId}
@@ -807,6 +778,20 @@ export function LiveReasoningRenderer({
   usePointerGlow(preferences.pointerGlow);
   useFrostedGlass(preferences.frostedGlass);
   const data = item.data;
+  const endedAt = data.phase === "streaming" ? undefined : timestamp.getTime();
+  // The previous settled section is this one's start. That still holds when
+  // the card mounts after the thought finished (a scroll back, a reload, or a
+  // provider that sends the whole summary in one piece), where no live start
+  // was ever observed. The first streaming render is the fallback when the
+  // store has no previous section yet.
+  const sectionAt = endedAt ?? timestamp.getTime();
+  const previousEnd = previousSectionEnd(agentId, sectionAt);
+  const firstSeen = useRef<number | null>(null);
+  if (data.phase === "streaming" && firstSeen.current === null) {
+    firstSeen.current = timestamp.getTime();
+  }
+  const startedAt = previousEnd ?? firstSeen.current ?? undefined;
+  if (endedAt !== undefined) noteSectionEnd(agentId, endedAt, "reasoning");
   // The host owns the reveal cadence, so streamed reasoning animates the same
   // way it does in the native timeline instead of appearing in whole blocks.
   const revealed = useRevealedText(
@@ -859,8 +844,13 @@ export function LiveReasoningRenderer({
     return {
       id: "live-reasoning",
       agentModel: "",
-      durationMs: 0,
+      durationMs:
+        startedAt !== undefined && endedAt !== undefined
+          ? Math.max(0, endedAt - startedAt)
+          : 0,
       totalTokens: Math.round(rawText.length / 4),
+      startedAt,
+      endedAt,
       status: data.phase === "streaming" ? "thinking" : "completed",
       steps:
         steps.length > 0
@@ -875,7 +865,7 @@ export function LiveReasoningRenderer({
               },
             ],
     };
-  }, [data, revealed]);
+  }, [data, revealed, endedAt, startedAt]);
 
   if (runClosed) {
     return (
@@ -954,6 +944,7 @@ export function LiveTodoRenderer({
 
 export interface LiveAssistantPayload {
   text: string;
+  phase?: string;
 }
 
 /**
@@ -979,12 +970,25 @@ export function LiveAssistantRenderer({
   useFrostedGlass(preferences.frostedGlass);
 
   // Replacing the reply costs the host's footer, which the stream layout hangs
-  // off an `assistant_message` item that no longer exists. Rebuild it where the
-  // host puts it: under the newest message, once, not under every reply.
+  // off an `assistant_message` item that no longer exists. Rebuild the clock
+  // under every reply, and the Copy and Select actions under the newest one,
+  // where the host puts its own controls.
   const itemKey = `assistant:${timestamp.getTime()}`;
   const isTail = useIsTimelineTail(itemKey);
   const runKey = runItemKey("assistant", item.data.text, timestamp.getTime());
   useRunMember(agentId, runKey, undefined, timestamp.getTime(), undefined, preferences.cardRunBar);
+
+  // The previous settled section is the start of this reply: the prompt for a
+  // reply with no tools, or the last tool/reasoning card otherwise. That is
+  // still known when the card mounts after the reply finished.
+  const endedAt = item.data.phase === "streaming" ? undefined : timestamp.getTime();
+  const sectionAt = endedAt ?? timestamp.getTime();
+  const previousEnd = previousSectionEnd(agentId, sectionAt);
+  const elapsedMs =
+    endedAt !== undefined && previousEnd !== undefined
+      ? Math.max(0, endedAt - previousEnd)
+      : undefined;
+  if (endedAt !== undefined) noteSectionEnd(agentId, endedAt, "assistant");
 
   // Job results, IRC relays and reminders arrive as replies because the host
   // files any unclaimed `custom` message under this item kind. They are not
@@ -1008,11 +1012,20 @@ export function LiveAssistantRenderer({
             tokens={tokens}
             variant={preferences.markdownVariant}
             marks={preferences.highlightMarks}
+            nativeProse
           />
         </RevealPathContext.Provider>
       )}
-      {isTail && !envelope ? (
-        <AssistantFooter text={item.data.text} at={timestamp} tokens={tokens} />
+      {!envelope ? (
+        <AssistantFooter
+          text={item.data.text}
+          at={timestamp}
+          tokens={tokens}
+          actions={isTail}
+          elapsedMs={elapsedMs}
+          elapsedFrom={previousEnd}
+          streaming={item.data.phase === "streaming"}
+        />
       ) : null}
       <TimelineTailHub
         agentId={agentId}
@@ -1149,6 +1162,9 @@ export function LiveUserMessageRenderer({
   // replay. A job result is not something the user said, so it never takes the
   // user bubble.
   const envelope = useMemo(() => parseSystemEnvelope(item.data.text), [item.data.text]);
+
+  // A prompt is the settled start of whatever section follows it.
+  noteSectionEnd(agentId, timestamp.getTime(), "user");
 
   return (
     <View {...surfaceProps(runRowProps(runItemKey("user", item.data.text, timestamp.getTime())), promptRowAnchor(item.data.messageId))}>

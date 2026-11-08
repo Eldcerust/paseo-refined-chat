@@ -14,6 +14,8 @@ import { countDiffLines, offsetHunkHeaders } from "./diff-text";
 import type { ExtendedThemeTokens } from "./theme-tokens";
 import { HubCallout } from "./hub-callout";
 import { PaseoToolCallout } from "./paseo-tool-callouts";
+import { RunDuration } from "./duration";
+import { formatMessageTime } from "./message-time";
 import { SyntaxHighlightBlock, renderPlainOutput } from "./syntax-highlight";
 import { FoldedOutput } from "./folded-output";
 import type { PathKind } from "./markdown/file-path";
@@ -27,6 +29,7 @@ import { selectionCodeText, selectionSurface } from "./selection-actions";
 import type { ToolCalloutData } from "../../shared/contracts";
 import { lineSelector } from "../../shared/file-rpc";
 import { displayPath } from "../file-link";
+import { sameAnswer } from "../ask-question";
 import { shouldAutoCollapse } from "../tool-collapse";
 import type { AutoCollapseRules } from "../tool-collapse";
 
@@ -92,6 +95,10 @@ interface ToolCalloutProps {
   shellMaxLines?: number;
   /** Lines of code and diffs shown before the rest folds; 0 shows all. */
   codeMaxLines?: number;
+  /** Epoch milliseconds the call was first seen running. */
+  startedAt?: number;
+  /** Epoch milliseconds the call settled, when the host reported it. */
+  finishedAt?: number;
 }
 
 export function ToolCallout({
@@ -106,6 +113,8 @@ export function ToolCallout({
   cwd,
   shellMaxLines = 0,
   codeMaxLines = 0,
+  startedAt,
+  finishedAt,
 }: ToolCalloutProps) {
   const restored = savedCardState(stateKey);
   const [expanded, setExpanded] = useState(restored?.expanded ?? defaultExpanded);
@@ -126,7 +135,7 @@ export function ToolCallout({
     data.tool === "edit" ||
     data.tool === "eval" ||
     (data.tool === "mcp" && Boolean(data.mcp)) ||
-    (data.tool === "ask" && Boolean(data.askOptions)) ||
+    (data.tool === "ask" && Boolean(data.askQuestions?.length)) ||
     (data.tool === "task" && Boolean(data.subagent)) ||
     (data.tool === "hub" && Boolean(data.hub)) ||
     (data.tool === "paseo" && Boolean(data.paseo));
@@ -155,6 +164,15 @@ export function ToolCallout({
   const isSuccess = data.status === "completed";
   const isRunning = data.status === "running";
   const isFailed = data.status === "failed";
+  // A provider may report its own duration; when it does not, the card measures
+  // the gap between the first running render and the moment the call settled.
+  // The host rewrites the timeline timestamp on completion, so the start has to
+  // have been recorded while the call was still running.
+  const shownDurationMs =
+    data.durationMs ??
+    (startedAt !== undefined && finishedAt !== undefined && finishedAt >= startedAt
+      ? finishedAt - startedAt
+      : undefined);
   // A running call is still printing, so folding it would move the page under
   // the reader as it grows.
   const shellLimit = isRunning ? 0 : shellMaxLines;
@@ -231,16 +249,7 @@ export function ToolCallout({
   const iconColor =
     data.tool === "git" ? "#F05032" : data.tool === "github" ? tokens.foreground : tokens.accent;
 
-  // A reply that matches no offered label is free text the user typed, so it
-  // is labelled as such rather than pretending an option was picked.
-  const answered = data.askAnswer ?? [];
-  const typedReply =
-    answered.length > 0 &&
-    !answered.some((answer) =>
-      (data.askOptions ?? []).some(
-        (option) => option.label.trim().toLowerCase() === answer.trim().toLowerCase(),
-      ),
-    );
+  const askQuestions = data.askQuestions ?? [];
 
   const styles = useMemo(
     () =>
@@ -312,6 +321,14 @@ export function ToolCallout({
           fontSize: tokens.fs(11),
           fontFamily: tokens.fontUi,
           color: tokens.foregroundSubtle,
+          // A live count must not jitter the header as its digits change.
+          fontVariant: ["tabular-nums"],
+        },
+        endTime: {
+          fontSize: tokens.fs(10),
+          fontFamily: tokens.fontUi,
+          color: tokens.foregroundSubtle,
+          fontVariant: ["tabular-nums"],
         },
         statusBadge: {
           paddingHorizontal: 6,
@@ -407,6 +424,20 @@ export function ToolCallout({
         // Ask tool options
         askContainer: {
           gap: 8,
+        },
+        askQuestionText: {
+          fontFamily: tokens.fontUi,
+          fontSize: tokens.fs(13),
+          fontWeight: "600",
+          lineHeight: tokens.fs(19),
+          color: tokens.foreground,
+          marginBottom: 6,
+        },
+        askQuestionGap: {
+          marginTop: 14,
+          paddingTop: 12,
+          borderTopWidth: 1,
+          borderTopColor: tokens.borderSubtle,
         },
         askPrompt: {
           fontFamily: tokens.fontUi,
@@ -679,9 +710,17 @@ export function ToolCallout({
             </Text>
           ) : null}
 
-          {data.durationMs ? (
-            <Text selectable style={styles.durationBadge}>
-              {data.durationMs}ms
+          <RunDuration
+            running={isRunning}
+            startedAt={startedAt}
+            durationMs={shownDurationMs}
+            style={[styles.durationBadge, isRunning ? { color: tokens.accent } : null]}
+            selectable
+          />
+
+          {!isRunning && finishedAt !== undefined ? (
+            <Text selectable style={styles.endTime}>
+              {formatMessageTime(new Date(finishedAt))}
             </Text>
           ) : null}
 
@@ -870,11 +909,6 @@ export function ToolCallout({
                       {data.mcp.transport}
                     </Text>
                   )}
-                  {data.durationMs ? (
-                    <Text selectable style={styles.durationBadge}>
-                      {data.durationMs}ms
-                    </Text>
-                  ) : null}
                 </View>
               </View>
 
@@ -1021,61 +1055,85 @@ export function ToolCallout({
             </View>
           )}
 
-          {data.tool === "ask" && data.askOptions && (
+          {data.tool === "ask" && askQuestions.length > 0 && (
             <View style={styles.askContainer}>
-              <Text selectable style={styles.askPrompt}>
-                {answered.length > 0 ? "Options offered:" : "Waiting for a decision:"}
-              </Text>
-              {data.askOptions.map((opt) => {
-                // The answer is whatever the tool reported, so a label match
-                // marks the chosen row. A typed reply matches nothing and is
-                // shown on its own line below.
-                const isChosen = (data.askAnswer ?? []).some(
-                  (answer) => answer.trim().toLowerCase() === opt.label.trim().toLowerCase(),
-                );
+              {askQuestions.map((asked, questionIndex) => {
+                const answered = asked.answers.length > 0;
+                // A reply that matches no offered label is free text the user
+                // typed, so it is labelled as such rather than as a pick.
+                const typedReply =
+                  answered &&
+                  !asked.answers.some((answer) =>
+                    asked.options.some((option) => sameAnswer(option.label, answer)),
+                  );
                 return (
-                  <View
-                    key={opt.id}
-                    style={[styles.askOptionCard, isChosen && styles.askOptionCardSelected]}
-                  >
-                    <View style={styles.askOptionLeft}>
-                      <View style={styles.askOptionLabelRow}>
-                        <Text
-                          selectable
-                          style={[styles.askOptionLabel, isChosen && styles.askOptionLabelChosen]}
+                  <View key={questionIndex} style={questionIndex > 0 ? styles.askQuestionGap : undefined}>
+                    {asked.question ? (
+                      <Text selectable style={styles.askQuestionText}>
+                        {asked.header ? `${asked.header}: ` : ""}
+                        {asked.question}
+                      </Text>
+                    ) : null}
+                    {asked.options.length > 0 ? (
+                      <Text selectable style={styles.askPrompt}>
+                        {answered
+                          ? "Options offered:"
+                          : isRunning
+                            ? "Waiting for a decision:"
+                            : "Options offered, no answer recorded:"}
+                      </Text>
+                    ) : null}
+                    {asked.options.map((opt) => {
+                      // The answer is whatever the tool reported, so a label
+                      // match marks the chosen row. A typed reply matches
+                      // nothing and is shown on its own line below.
+                      const isChosen = asked.answers.some((answer) => sameAnswer(answer, opt.label));
+                      return (
+                        <View
+                          key={opt.id}
+                          style={[styles.askOptionCard, isChosen && styles.askOptionCardSelected]}
                         >
-                          {opt.label}
+                          <View style={styles.askOptionLeft}>
+                            <View style={styles.askOptionLabelRow}>
+                              <Text
+                                selectable
+                                style={[styles.askOptionLabel, isChosen && styles.askOptionLabelChosen]}
+                              >
+                                {opt.label}
+                              </Text>
+                              {opt.recommended ? (
+                                <Text selectable style={styles.recommendedBadge}>
+                                  Recommended
+                                </Text>
+                              ) : null}
+                            </View>
+                            {opt.description ? (
+                              <Text selectable style={styles.askOptionDesc}>
+                                {opt.description}
+                              </Text>
+                            ) : null}
+                          </View>
+                          {isChosen ? (
+                            <Glyph name="CheckCircle" size={16} color={tokens.success} />
+                          ) : (
+                            <Glyph name="Circle" size={14} color={tokens.foregroundSubtle} />
+                          )}
+                        </View>
+                      );
+                    })}
+                    {answered ? (
+                      <View style={styles.askAnswerRow}>
+                        <Text selectable style={styles.askAnswerKey}>
+                          {typedReply ? "typed" : "answered"}
                         </Text>
-                        {opt.recommended ? (
-                          <Text selectable style={styles.recommendedBadge}>
-                            Recommended
-                          </Text>
-                        ) : null}
+                        <Text selectable style={styles.askAnswerValue}>
+                          {asked.answers.join(", ")}
+                        </Text>
                       </View>
-                      {opt.description ? (
-                        <Text selectable style={styles.askOptionDesc}>
-                          {opt.description}
-                        </Text>
-                      ) : null}
-                    </View>
-                    {isChosen ? (
-                      <Glyph name="CheckCircle" size={16} color={tokens.success} />
-                    ) : (
-                      <Glyph name="Circle" size={14} color={tokens.foregroundSubtle} />
-                    )}
+                    ) : null}
                   </View>
                 );
               })}
-              {answered.length > 0 ? (
-                <View style={styles.askAnswerRow}>
-                  <Text selectable style={styles.askAnswerKey}>
-                    {typedReply ? "typed" : "answered"}
-                  </Text>
-                  <Text selectable style={styles.askAnswerValue}>
-                    {answered.join(", ")}
-                  </Text>
-                </View>
-              ) : null}
             </View>
           )}
 

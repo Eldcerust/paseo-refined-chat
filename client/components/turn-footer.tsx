@@ -4,8 +4,10 @@ import { copyText } from "@getpaseo/plugin/client/react-native";
 import { Glyph } from "./glyph";
 import { unselectable } from "./selection";
 import { formatMessageTime } from "./message-time";
+import { LiveElapsed, formatDuration } from "./duration";
 import { radius } from "./theme-tokens";
 import type { ExtendedThemeTokens } from "./theme-tokens";
+import { TextSelectionDialog, touchSelectionEnabled, useTextSelection } from "./text-selection";
 
 /**
  * The host's own reply footer — copy, fork and the turn's time — is drawn by
@@ -25,12 +27,32 @@ interface AssistantFooterProps {
   text: string;
   at: Date;
   tokens: ExtendedThemeTokens;
+  /**
+   * Copy and Select belong on the newest reply, where Paseo's own footer
+   * sits. Every reply keeps its time in the bottom-right corner.
+   */
+  actions?: boolean;
+  /** Settled gap from the previous section's end to this reply's end. */
+  elapsedMs?: number;
+  /** Epoch ms this reply's section began; its live count while streaming. */
+  elapsedFrom?: number;
+  /** True while the reply is still arriving. */
+  streaming?: boolean;
 }
 
 const COPIED_MS = 1600;
 
-export function AssistantFooter({ text, at, tokens }: AssistantFooterProps) {
+export function AssistantFooter({
+  text,
+  at,
+  tokens,
+  actions = true,
+  elapsedMs,
+  elapsedFrom,
+  streaming = false,
+}: AssistantFooterProps) {
   const [copied, setCopied] = useState(false);
+  const { snapshot, openSelection, closeSelection } = useTextSelection(text);
 
   const handleCopy = useCallback(() => {
     void copyText(text)
@@ -71,11 +93,35 @@ export function AssistantFooter({ text, at, tokens }: AssistantFooterProps) {
           color: copied ? tokens.success : tokens.foregroundMuted,
           ...unselectable,
         },
+        selectButton: {
+          flexDirection: "row",
+          alignItems: "center",
+          gap: 4,
+          paddingHorizontal: 6,
+          paddingVertical: 3,
+          borderRadius: radius.block,
+        },
         time: {
           fontFamily: tokens.fontUi,
           fontSize: tokens.fs(11),
           color: tokens.foregroundSubtle,
+          fontVariant: ["tabular-nums"],
           ...unselectable,
+        },
+        elapsed: {
+          fontFamily: tokens.fontUi,
+          fontSize: tokens.fs(11),
+          color: tokens.foregroundMuted,
+          fontVariant: ["tabular-nums"],
+          ...unselectable,
+        },
+        trailing: {
+          // The reply's own edge: the footer runs the width of the column, so
+          // the elapsed gap and the clock sit in its bottom-right corner.
+          marginLeft: "auto",
+          flexDirection: "row",
+          alignItems: "center",
+          gap: 8,
         },
       }),
     [tokens, copied],
@@ -87,20 +133,42 @@ export function AssistantFooter({ text, at, tokens }: AssistantFooterProps) {
 
   return (
     <View style={styles.container}>
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel={copied ? "Reply copied" : "Copy reply"}
-        onPress={handleCopy}
-        style={styles.copyButton}
-      >
-        <Glyph
-          name={copied ? "Check" : "Copy"}
-          size={12}
-          color={copied ? tokens.success : tokens.foregroundMuted}
-        />
-        <Text style={styles.copyLabel}>{copied ? "Copied" : "Copy"}</Text>
-      </Pressable>
-      <Text style={styles.time}>{time}</Text>
+      <TextSelectionDialog text={snapshot} onClose={closeSelection} tokens={tokens} />
+      {actions ? (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={copied ? "Reply copied" : "Copy reply"}
+          onPress={handleCopy}
+          style={styles.copyButton}
+        >
+          <Glyph
+            name={copied ? "Check" : "Copy"}
+            size={12}
+            color={copied ? tokens.success : tokens.foregroundMuted}
+          />
+          <Text style={styles.copyLabel}>{copied ? "Copied" : "Copy"}</Text>
+        </Pressable>
+      ) : null}
+      {actions && touchSelectionEnabled ? (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Select part of the reply"
+          accessibilityHint="Opens a text field where the platform's selection handles work"
+          onPress={openSelection}
+          style={styles.selectButton}
+        >
+          <Glyph name="TextSelect" size={12} color={tokens.foregroundMuted} />
+          <Text style={styles.copyLabel}>Select</Text>
+        </Pressable>
+      ) : null}
+      <View style={styles.trailing}>
+        {streaming && elapsedFrom !== undefined ? (
+          <LiveElapsed startedAt={elapsedFrom} active style={styles.elapsed} />
+        ) : elapsedMs !== undefined ? (
+          <Text style={styles.elapsed}>{formatDuration(elapsedMs)}</Text>
+        ) : null}
+        <Text style={styles.time}>{time}</Text>
+      </View>
     </View>
   );
 }

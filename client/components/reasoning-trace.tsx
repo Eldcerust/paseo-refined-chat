@@ -14,6 +14,14 @@ import { selectionSurface } from "./selection-actions";
 import type { ExtendedThemeTokens } from "./theme-tokens";
 import type { ReasoningTraceData, ReasoningStep } from "../../shared/contracts";
 import { SyntaxHighlightBlock } from "./syntax-highlight";
+import { LiveElapsed, formatDuration } from "./duration";
+import { formatMessageTime } from "./message-time";
+
+/** Tenths under a minute; human minutes and hours above it. */
+function formatElapsed(ms: number): string {
+  if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`;
+  return formatDuration(ms);
+}
 
 interface ReasoningTraceProps {
   data: ReasoningTraceData;
@@ -45,7 +53,7 @@ export function ReasoningTrace({
   }, []);
   const [activeStepId, setActiveStepId] = useState<string | null>(null);
 
-  const durationFormatted = (data.durationMs / 1000).toFixed(1);
+  const durationFormatted = formatElapsed(data.durationMs);
   const isThinking = data.status === "thinking";
 
   // A trace that was open only because it streamed folds once the thought ends.
@@ -181,6 +189,19 @@ export function ReasoningTrace({
           fontWeight: "600",
           color: tokens.accent,
         },
+        statusTime: {
+          fontFamily: tokens.fontUi,
+          fontSize: tokens.fs(11),
+          fontWeight: "600",
+          fontVariant: ["tabular-nums"],
+          color: tokens.accent,
+        },
+        endTime: {
+          fontFamily: tokens.fontUi,
+          fontSize: tokens.fs(10),
+          fontVariant: ["tabular-nums"],
+          color: tokens.foregroundSubtle,
+        },
         body: {
           paddingHorizontal: 16,
           paddingTop: 12,
@@ -288,7 +309,7 @@ export function ReasoningTrace({
                 {isThinking
                   ? "Thinking in progress…"
                   : data.durationMs > 0
-                    ? `Thought for ${durationFormatted}s`
+                    ? `Reasoning summary · Elapsed ${durationFormatted}`
                     : "Reasoning summary"}
               </Text>
             </View>
@@ -322,7 +343,14 @@ export function ReasoningTrace({
               <Text selectable style={styles.statusText}>
                 Reasoning
               </Text>
+              {data.startedAt !== undefined ? (
+                <LiveElapsed startedAt={data.startedAt} active style={styles.statusTime} />
+              ) : null}
             </View>
+          ) : data.endedAt !== undefined ? (
+            <Text selectable style={styles.endTime}>
+              {formatMessageTime(new Date(data.endedAt))}
+            </Text>
           ) : null}
           <Rotate active={isExpanded}>
             <Glyph name="ChevronDown" size={16} color={tokens.foregroundMuted} />

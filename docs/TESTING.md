@@ -87,6 +87,72 @@ Use a project that holds a Markdown file with a heading, a link to another file 
   that line, in the output and in the error output alike. A URL, a version number
   and a `\\host\share` path stay plain text.
 
+## Message times and the run timer
+
+- Every prompt shows its clock in the bottom-right corner of the bubble, beside
+  the token usage when that row exists, not in the "You" header.
+- Every reply shows its clock at the right edge of the column, preceded by the
+  elapsed time since the previous section (a prompt, tool or thought). The
+  newest reply also carries Copy and Select on the same row; an older reply has
+  only its times.
+- A reasoning card shows a live count while it thinks, then keeps
+  "Reasoning summary" and appends "· Elapsed X" plus the clock time it ended at
+  its top-right edge, even when folded. Scroll back to an old reasoning card: it
+  still shows an elapsed time, measured from the previous section.
+- A finished tool card shows its clock end time beside the duration in its
+  header. A card still running has the live timer instead.
+- Start a shell command that takes a few seconds (for example `Start-Sleep 8`
+  in PowerShell or `sleep 8` in Bash). Its card shows a count that advances once
+  a second while it runs, then settles on a readable duration such as `8s`.
+- A completed tool card starts open and shows its output: run a command that
+  prints several lines, and a web search. The shell card's body holds the
+  command output; the web search card is titled `Search: <query>` and holds the
+  result text. Set a kind under "Cards that start collapsed" to fold it again,
+  or "Collapse when finished" to fold it once it completes.
+- Let a command run past a minute and check the label becomes `1m 5s`; a call
+  under a second reads `<1s`. A card loaded from history without a recorded
+  start keeps the provider's duration when one was sent, and otherwise shows no
+  duration rather than a wrong one.
+
+## Touch selection (iOS)
+
+Use an iPhone or iPad; Android and web must look and behave as before.
+
+- Reply footer: **Copy** and **Select** sit side by side. **Select** opens a
+  "Select text" dialog holding the whole reply.
+- Prompt bubble: a text-select icon follows the copy icon and opens the prompt.
+- Code block header: **Select** follows **Copy** and opens the block's whole
+  code, including lines hidden by "Show N more lines".
+- Prose, headings, lists and quotes in a reply are drawn by Paseo's native view:
+  long-press a word, drag the handles across paragraphs and tap Copy. They look
+  like Paseo's own replies, not the plugin's typography.
+- Code blocks and tables keep the plugin's look. Long-press a table cell or a
+  code line: the dialog opens with the reply (table) or the code (code line).
+- A reply that alternates prose, a code block and prose draws three pieces; each
+  prose piece selects on its own, and a selection does not cross the code block.
+- In the dialog, long-press the text, drag the handles over part of it and tap
+  Copy; paste elsewhere and check only that part arrived. Select All copies all.
+- Press **Copy** on the same blocks: it still copies the whole text and shows
+  "Copied".
+- On Android and web no **Select** control appears, and a long-press does not
+  open the dialog.
+
+## Questions the agent asks
+
+Ask an agent to use its question tool, with one question and then with several
+(in opencode, Claude Code and Codex if available).
+
+- Each question shows its full text, then its options, with the recommended
+  one badged.
+- After you answer, the picked option is ticked and an "answered" line repeats
+  it. A multiple-choice question ticks every pick.
+- Type your own reply instead of picking: the line reads "typed" and no option
+  is ticked.
+- A call with several questions lists all of them, each with its own answer; the
+  title reads "first question (+N more)".
+- Dismiss the prompt without answering: the card says "no answer recorded".
+- While it waits, the card says "Waiting for a decision" and does not fold.
+
 ## Interoperability
 
 - Keep the original Beautiful Chat plugin disabled. Both intercept the

@@ -20,36 +20,33 @@ folds, and how it is coloured. Coverage of specialised events can differ by prov
 - Its own **find bar** (Ctrl/Cmd+F) that searches the whole chat, tool cards included.
 
 Refined Chat is an independent fork of [Beautiful Chat](https://github.com/ABorakati/beautiful-chat)
-by ABorakati. It is not affiliated with or endorsed by the upstream developer or Paseo. Both plugins
+by ABorakati, and this repository is a fork of [GenoDevelop/paseo-refined-chat](https://github.com/GenoDevelop/paseo-refined-chat)
+that adds touch selection on iOS and a question card that shows what was asked and answered. It is not
+affiliated with or endorsed by the upstream developers or Paseo. Both plugins
 intercept Paseo timeline items, so **disable Beautiful Chat before enabling Refined Chat**. See
 [Credits](#credits-and-license).
 
 ## Install
 
-From the Paseo catalog:
+Install from this repository, which follows `main`:
 
 ```bash
-paseo plugin add genodevelop/refined-chat
+paseo plugin add git:Eldcerust/paseo-refined-chat
 ```
 
-The plugin installs under the ID `refined-chat`. If you already have a plugin with that ID (an
-earlier install from Git, say), Paseo refuses with `Plugin ID "refined-chat" is already configured`:
+Or pin a commit:
+
+```bash
+paseo plugin add git:Eldcerust/paseo-refined-chat --ref <commit>
+```
+
+The plugin installs under the ID `refined-chat`. If you already have a plugin with that ID (the
+original Refined Chat, say), Paseo refuses with `Plugin ID "refined-chat" is already configured`:
 remove the old one with `paseo plugin remove refined-chat`, or give the new one another ID with
-`--id`, for example `paseo plugin add genodevelop/refined-chat --id refined-chat-catalog`.
+`--id`, for example `paseo plugin add git:Eldcerust/paseo-refined-chat --id refined-chat-fork`.
 
-The catalog installs a revision a reviewer has checked, and a new version reaches it
-only when it is submitted again. To follow `main` instead, install from the
-public GitHub repository:
-
-```bash
-paseo plugin add git:GenoDevelop/paseo-refined-chat
-```
-
-Or pin a published release by its tag:
-
-```bash
-paseo plugin add git:GenoDevelop/paseo-refined-chat --ref v0.5.0
-```
+To use the original instead, install it from the Paseo catalog with
+`paseo plugin add genodevelop/refined-chat`.
 
 Requires **Paseo 0.11.0 or later**. Everything below is configured in
 **Settings → Plugins → Refined Chat**, and each setting is stored on the client you change it on.
@@ -155,11 +152,12 @@ for, then folds them again when it closes. Text selection covers only the lines 
 
 | Card | What you get |
 | --- | --- |
-| **Shell and Git** | A terminal frame with Bash highlighting, exit code and duration. The header says what the command did: what git changed (`+53 −0`), how many lines it printed (`8 lines`), or `no output`. A failed call keeps its exit code. |
+| **Shell and Git** | A terminal frame with Bash highlighting, exit code and duration. A running call ticks its elapsed time in the header once a second; a finished call shows the gap as `4s`, `1m 12s` or `1h 5m` and the clock time it ended. The header also says what the command did: what git changed (`+53 −0`), how many lines it printed (`8 lines`), or `no output`. A failed call keeps its exit code. |
+| **Search** | The query in the header (`Search: Paseo coding agent`) and the provider's result text in the body. File searches show their matches and file list; web searches show the result text. |
 | **Read** | The file's language logo, a path that is a link (shown relative to the working directory when the file lies inside it), line numbers (real ones when the read starts mid-file), a copy button, and how many lines came back. |
 | **Write and Edit** | Diffs with old and new line numbers, adjacent removed and added rows joined into one block, and the changed words highlighted. The header carries `+X −Y`. A failed call shows no count, and a failed edit labels its diff "Not applied". The path is a link, like on a read card. |
 | **Images** | The picture itself instead of an empty code block. See [Images](#images). |
-| **Reasoning** | Live thinking text, a token badge, numbered steps, a connected rail with per-step time. |
+| **Reasoning** | Live thinking text, a token badge, numbered steps, a connected rail with per-step time, a live count while thinking, then "Reasoning summary · Elapsed X" and the clock time it ended. |
 | **MCP** | Server badge, transport, input parameters and the response, each highlighted. |
 | **Eval** | One card per kernel cell: the source that ran, then what it printed. |
 | **Ask** | Option cards with the recommended badge, the chosen answer marked, and a typed reply labelled as typed. |
@@ -168,7 +166,7 @@ for, then folds them again when it closes. Text selection covers only the lines 
 | **Paseo tools** | Paseo's mark leads the card, and a created agent's provider carries its brand mark. |
 | **Checklist** | Phase name, per-task status and duration, and a blocked task with its reason. |
 | **Approval** | Risk class, the exact command, target path and working directory, with the approve and deny actions the host owns. |
-| **Prompt** | The authored turn on a raised surface with a copy button and the turn's token usage. |
+| **Prompt** | The authored turn on a raised surface with a copy button, the turn's token usage, and the time in the bottom-right corner. Every reply carries its own elapsed time and clock in the bottom-right corner. |
 
 A tool the plugin has no typed card for still shows its output in the terminal frame, and a call that
 printed nothing says so. No card renders an empty panel.
@@ -402,8 +400,8 @@ esbuild .showcase/showcase.tsx --bundle --outfile=.showcase/showcase.js --jsx=au
 
 ## Credits and license
 
-The original Beautiful Chat implementation is by **ABorakati**, and Refined Chat keeps its Git history
-and MIT license. Several features adapt work from open upstream pull requests, credited to their authors
+The original Beautiful Chat implementation is by **ABorakati**, Refined Chat is by **GenoDevelop**,
+and this fork keeps their Git history and MIT license. Several features adapt work from open upstream pull requests, credited to their authors
 in [NOTICE.md](NOTICE.md).
 
 Code is MIT-licensed; embedded fonts keep their own SIL OFL 1.1 terms. See [LICENSE](LICENSE),

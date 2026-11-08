@@ -11,6 +11,7 @@ import { installChatFind } from "./client/components/chat-find";
 import { installLinkStyle } from "./client/components/markdown/link-style";
 import { extractPromptImages } from "./client/prompt-images";
 import { attachRemotePreferences, getEnhancerPreferences } from "./client/preferences";
+import { noteRunningCall, readRunStart } from "./client/run-start";
 import { yieldsToHost } from "./client/host-chat-display";
 import {
   isCardHidden,
@@ -136,6 +137,12 @@ export default function contribute(client: PluginClientContext) {
     transform({ item, phase }) {
       if (item.type !== "tool_call") return undefined;
       if (yieldsToHost("tool_call")) return undefined;
+      // The host overwrites the item's timestamp when the call settles, so a
+      // running item is the only moment its start is known. Record that for the
+      // finished card's measured duration.
+      const callKey = item.callId ?? item.name;
+      const startedAt =
+        item.status === "running" ? noteRunningCall(callKey) : readRunStart(callKey);
       const toolId = toolCardId(item.callId);
       if (toolId && hiddenByBar(toolId)) {
         noteCardStatus(
@@ -155,6 +162,7 @@ export default function contribute(client: PluginClientContext) {
               status: item.status,
               detail: toJsonValue(item.detail),
               ...(item.callId ? { callId: item.callId } : {}),
+              ...(startedAt !== undefined ? { startedAt } : {}),
               error: extractErrorText(item.error),
               phase,
             },
@@ -173,6 +181,7 @@ export default function contribute(client: PluginClientContext) {
       status: z.string(),
       detail: z.record(z.string(), z.unknown()).optional(),
       callId: z.string().optional(),
+      startedAt: z.number().optional(),
       error: z.string().nullable().optional(),
       phase: z.string().optional(),
     }),
@@ -312,7 +321,7 @@ export default function contribute(client: PluginClientContext) {
   const removeAssistantTransformer = client.addTimelineTransformer({
     id: "omp-enhanced-assistant",
     query: { itemType: "assistant_message" },
-    transform({ item }) {
+    transform({ item, phase }) {
       if (item.type !== "assistant_message") return undefined;
       if (!getEnhancerPreferences().assistantMarkdown) return undefined;
       if (yieldsToHost("assistant_message")) return undefined;
@@ -323,7 +332,7 @@ export default function contribute(client: PluginClientContext) {
             type: "plugin" as const,
             kind: "omp-assistant",
             version: 1,
-            data: { text: item.text },
+            data: { text: item.text, phase },
           },
         ],
       };
@@ -333,7 +342,7 @@ export default function contribute(client: PluginClientContext) {
   const removeAssistantRenderer = client.addTimelineRenderer({
     kind: "omp-assistant",
     version: 1,
-    schema: z.object({ text: z.string() }),
+    schema: z.object({ text: z.string(), phase: z.string().optional() }),
     Component: LiveAssistantRenderer,
   });
 

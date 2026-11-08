@@ -10,6 +10,12 @@ import { selectableSurface } from "./selection";
 import { selectionSurface } from "./selection-actions";
 import { planFold, useFold } from "../fold";
 import { FoldBar } from "./fold-bar";
+import {
+  TextSelectionDialog,
+  longPressSelection,
+  touchSelectionEnabled,
+  useTextSelection,
+} from "./text-selection";
 
 export interface TurnUsage {
   inputTokens?: number;
@@ -90,6 +96,7 @@ export function UserMessage({
   maxLines = 0,
 }: UserMessageProps) {
   const [copied, setCopied] = useState(false);
+  const { snapshot, openSelection, closeSelection } = useTextSelection(text);
   const handleCopy = useCallback(() => {
     // The host owns clipboard access. Reaching for navigator directly would
     // only work on web and would bypass its permission handling.
@@ -160,6 +167,12 @@ export function UserMessage({
           fontSize: tokens.fs(10),
           color: tokens.userTextMuted,
         },
+        clockRow: {
+          flexDirection: "row",
+          alignItems: "center",
+          justifyContent: "flex-end",
+          marginTop: 6,
+        },
         text: {
           fontFamily: tokens.fontUi,
           fontSize: tokens.fs(13.5),
@@ -206,16 +219,12 @@ export function UserMessage({
 
   return (
     <View {...selectionSurface} style={styles.container}>
+      <TextSelectionDialog text={snapshot} onClose={closeSelection} tokens={tokens} />
       <View style={styles.body}>
         <View style={styles.metaRow}>
           <Text selectable style={styles.label}>
             You
           </Text>
-          {timestamp ? (
-            <Text selectable style={styles.clock}>
-              {formatMessageTime(timestamp)}
-            </Text>
-          ) : null}
           <Pressable
             onPress={handleCopy}
             accessibilityRole="button"
@@ -230,9 +239,21 @@ export function UserMessage({
               />
             </Pop>
           </Pressable>
+          {touchSelectionEnabled ? (
+            <Pressable
+              onPress={openSelection}
+              accessibilityRole="button"
+              accessibilityLabel="Select part of the prompt"
+              accessibilityHint="Opens a text field where the platform's selection handles work"
+              style={styles.copyButton}
+            >
+              <Glyph name="TextSelect" size={11} color={tokens.userTextMuted} />
+            </Pressable>
+          ) : null}
         </View>
         <Text
           selectable
+          {...longPressSelection(openSelection)}
           style={styles.text}
           numberOfLines={plan && folded ? maxLines : undefined}
         >
@@ -260,14 +281,23 @@ export function UserMessage({
             ))}
           </View>
         ) : null}
-        {usage ? (
-          <View style={styles.usageRow}>
-            <UsageFigure label="in" value={usage.inputTokens} styles={styles} />
-            <UsageFigure label="cached" value={usage.cachedInputTokens} styles={styles} />
-            <UsageFigure label="out" value={usage.outputTokens} styles={styles} />
-            {pending ? (
-              <Text selectable style={styles.usageKey}>
-                counting…
+        {usage || timestamp ? (
+          <View style={usage ? styles.usageRow : styles.clockRow}>
+            {usage ? (
+              <>
+                <UsageFigure label="in" value={usage.inputTokens} styles={styles} />
+                <UsageFigure label="cached" value={usage.cachedInputTokens} styles={styles} />
+                <UsageFigure label="out" value={usage.outputTokens} styles={styles} />
+                {pending ? (
+                  <Text selectable style={styles.usageKey}>
+                    counting…
+                  </Text>
+                ) : null}
+              </>
+            ) : null}
+            {timestamp ? (
+              <Text selectable style={styles.clock}>
+                {formatMessageTime(timestamp)}
               </Text>
             ) : null}
           </View>

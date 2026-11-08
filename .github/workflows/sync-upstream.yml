@@ -1,0 +1,80 @@
+# Keeps this fork's main current with GenoDevelop/paseo-refined-chat.
+#
+# Merges upstream main into this fork's main, checks that the result typechecks on a clean
+# runner, and pushes only if it does. A conflict or a typecheck failure fails the run, so
+# GitHub emails the repository owner, and nothing is pushed.
+#
+# Limits:
+# - CHANGELOG.md keeps both sides' lines; any other conflict needs a manual merge.
+# - GITHUB_TOKEN cannot push changes to .github/workflows, so an upstream commit that edits
+#   a workflow file makes the push fail and the merge has to be pushed by hand.
+# - GitHub turns scheduled workflows off after 60 days without repository activity.
+
+name: Sync upstream
+
+on:
+  schedule:
+    - cron: "17 */6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: sync-upstream
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    # Only the fork runs this; a copy of the file elsewhere stays inert.
+    if: github.repository == 'Eldcerust/paseo-refined-chat'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out main
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Merge upstream main
+        id: merge
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git remote add upstream https://github.com/GenoDevelop/paseo-refined-chat.git
+          git fetch --quiet upstream main
+          behind=$(git rev-list --count HEAD..upstream/main)
+          echo "behind=$behind" >> "$GITHUB_OUTPUT"
+          if [ "$behind" = "0" ]; then
+            echo "Already up to date with upstream main."
+            exit 0
+          fi
+          echo "$behind upstream commits to merge:"
+          git log --oneline HEAD..upstream/main
+          echo 'CHANGELOG.md merge=union' >> .git/info/attributes
+          if ! git merge --no-edit upstream/main; then
+            echo "::error::Merge conflict in: $(git diff --name-only --diff-filter=U | tr '\n' ' ')"
+            git merge --abort
+            exit 1
+          fi
+
+      - name: Set up Node
+        if: steps.merge.outputs.behind != '0'
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: lts/*
+          cache: npm
+
+      - name: Install dependencies
+        if: steps.merge.outputs.behind != '0'
+        run: npm ci --ignore-scripts
+
+      - name: Typecheck the merged result
+        if: steps.merge.outputs.behind != '0'
+        run: npm run typecheck
+
+      - name: Push
+        if: steps.merge.outputs.behind != '0'
+        run: git push origin HEAD:main
