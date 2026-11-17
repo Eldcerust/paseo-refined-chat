@@ -1,5 +1,6 @@
+import { IOSSelectableProse } from "./ios-selectable-prose";
 import React, { useMemo, useCallback, useState } from "react";
-import { View, Text, Pressable, StyleSheet, Image } from "react-native";
+import { View, Text, Pressable, StyleSheet, Image, Platform } from "react-native";
 import { copyText } from "@getpaseo/plugin/client/react-native";
 import { Glyph } from "./glyph";
 import { Pop } from "./motion";
@@ -251,7 +252,8 @@ export function UserMessage({
             </Pressable>
           ) : null}
         </View>
-        <Text
+        {Platform.OS !== "ios" || (plan && folded) ? (
+          <Text
           selectable
           {...longPressSelection(openSelection)}
           style={styles.text}
@@ -259,6 +261,11 @@ export function UserMessage({
         >
           {text}
         </Text>
+        ) : (
+          <IOSSelectableProse markdown={text.replace(/([\\`*_{}\[\]()#+.!>|~-])/g, "\\$1")} textStyle={styles.text}>
+            <Text selectable style={styles.text}>{text}</Text>
+          </IOSSelectableProse>
+        )}
         {plan ? (
           <FoldBar
             hidden={plan.hidden}

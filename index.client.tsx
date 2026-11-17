@@ -3,6 +3,9 @@ import { z } from "zod";
 import { BeautifulChatSettingsPage } from "./client/settings-page";
 import { embedFonts } from "./client/components/embed-fonts";
 import { FILE_PREVIEW_PANEL_ID, FilePreviewPanel, registerPanelOpener } from "./client/file-preview";
+import { PLAN_PANEL_ID, PlanPreviewPanel, registerPlanPanelOpener } from "./client/plan-preview";
+import { isHiddenPlanMessage, onPlanHistoryChange } from "./client/plan-history";
+import { ConversationOutlinePanel, OUTLINE_PANEL_ID } from "./client/outline-panel";
 import { installFrostedGlass } from "./client/components/frosted";
 import { installShimmer } from "./client/components/shimmer";
 import { installPointerGlow } from "./client/components/glow";
@@ -13,6 +16,7 @@ import { extractPromptImages } from "./client/prompt-images";
 import { attachRemotePreferences, getEnhancerPreferences } from "./client/preferences";
 import { noteRunningCall, readRunStart } from "./client/run-start";
 import { yieldsToHost } from "./client/host-chat-display";
+import { attachQuestionArchive, captureCodexQuestions, isHiddenCodexReply, noteCodexAskProjection, onCodexAskChange } from "./client/codex-ask";
 import {
   isCardHidden,
   noteCardStatus,
@@ -42,6 +46,41 @@ function toJsonValue(value: unknown): JsonValue {
 }
 
 export default function contribute(client: PluginClientContext) {
+  const removeOutline = client.addAgentPanel({
+    id: OUTLINE_PANEL_ID, title: "Conversation outline", icon: "ListTree", locations: ["explorer"], Component: ConversationOutlinePanel,
+  });
+  const removeOutlineCommand = client.addSlashCommand({
+    name: "outline", description: "Browse prompts, plans, questions and errors", argumentHint: "", context: "agent",
+    onSubmit({ openPanel }) { openPanel(OUTLINE_PANEL_ID, { location: "explorer" }); },
+  });
+  const outlineButtons = new Map<string, { workspaceId: string; remove(): void }>();
+  let outlineStopped = false;
+  const addOutlineButton = (agentId: string, workspaceId: string | undefined) => {
+    if (!workspaceId || outlineStopped || outlineButtons.get(agentId)?.workspaceId === workspaceId) return;
+    outlineButtons.get(agentId)?.remove();
+    const button = client.addComposerPill({
+      id: "open-conversation-outline", agentId, workspaceId,
+      button: {
+        title: "Conversation outline", label: "Outline", icon: "ListTree",
+        behavior: { kind: "action", onPress: () => client.openPanel(OUTLINE_PANEL_ID, { workspaceId, agentId, location: "explorer" }) },
+      },
+    });
+    outlineButtons.set(agentId, { workspaceId, remove: () => button.remove() });
+  };
+  const stopOutlineAgents = client.paseo.agents.subscribe(update => {
+    if (update.kind === "upsert") addOutlineButton(update.agent.id, update.agent.workspaceId);
+    else if (update.kind === "remove") {
+      outlineButtons.get(update.agentId)?.remove();
+      outlineButtons.delete(update.agentId);
+    }
+  });
+  client.paseo.agents.list().then(result => {
+    if (!outlineStopped) result.entries.forEach(({ agent }) => addOutlineButton(agent.id, agent.workspaceId));
+  }).catch(() => { /* Agent updates and /outline remain available if listing fails. */ });
+  const stopQuestionArchive = attachQuestionArchive(client.rpc);
+  const stopQuestionCapture = client.paseo.agents.subscribe(update => {
+    if (update.kind === "upsert") captureCodexQuestions(update.agent.id, update.agent.pendingPermissions);
+  });
   // Android has no browser storage: its settings live on the daemon.
   const removeRemotePreferences = attachRemotePreferences(client.rpc);
   // Install the bundled faces before any surface paints.
@@ -127,6 +166,10 @@ export default function contribute(client: PluginClientContext) {
     Component: FilePreviewPanel,
   });
   registerPanelOpener((id, options) => client.openPanel(id, options));
+  const removePlanPanel = client.addWorkspacePanel({
+    id: PLAN_PANEL_ID, title: "Plan", icon: "ListChecks", locations: ["explorer"], Component: PlanPreviewPanel,
+  });
+  registerPlanPanelOpener((id, options) => client.openPanel(id, options));
 
   // Live chat timeline interception: render real tool calls, reasoning, and todos with enhanced UI.
   // A bar over a run of cards hides the cards through these transformers. The
@@ -137,6 +180,7 @@ export default function contribute(client: PluginClientContext) {
     transform({ item, phase }) {
       if (item.type !== "tool_call") return undefined;
       if (yieldsToHost("tool_call")) return undefined;
+      noteCodexAskProjection(item.callId, item.name, item.detail);
       // The host overwrites the item's timestamp when the call settles, so a
       // running item is the only moment its start is known. Record that for the
       // finished card's measured duration.
@@ -161,6 +205,7 @@ export default function contribute(client: PluginClientContext) {
               name: item.name,
               status: item.status,
               detail: toJsonValue(item.detail),
+              ...(item.metadata ? { metadata: toJsonValue(item.metadata) } : {}),
               ...(item.callId ? { callId: item.callId } : {}),
               ...(startedAt !== undefined ? { startedAt } : {}),
               error: extractErrorText(item.error),
@@ -180,6 +225,7 @@ export default function contribute(client: PluginClientContext) {
       name: z.string(),
       status: z.string(),
       detail: z.record(z.string(), z.unknown()).optional(),
+      metadata: z.record(z.string(), z.unknown()).optional(),
       callId: z.string().optional(),
       startedAt: z.number().optional(),
       error: z.string().nullable().optional(),
@@ -263,7 +309,7 @@ export default function contribute(client: PluginClientContext) {
     Component: LiveTodoRenderer,
   });
 
-  const removeUserTransformer = client.addTimelineTransformer({
+  const addUserTransformer = () => client.addTimelineTransformer({
     id: "omp-enhanced-user-message",
     query: { itemType: "user_message" },
     transform({ item }) {
@@ -277,6 +323,7 @@ export default function contribute(client: PluginClientContext) {
       // Replacing the item drops whatever this renderer does not carry, so a
       // message with an attachment it cannot show is left to the host.
       if (images.hasUnrenderable) return undefined;
+      if (images.uris.length === 0 && (isHiddenCodexReply(item.messageId, item.text) || isHiddenPlanMessage(item.messageId, item.text))) return { items: [] };
       // A prompt with no text is a pasted image and nothing else. The host
       // withholds the image from the plugin, so there is nothing here to draw:
       // an empty bubble would replace the screenshot with a blank. The host's
@@ -303,6 +350,22 @@ export default function contribute(client: PluginClientContext) {
       };
     },
   });
+
+  let removeUserTransformer = addUserTransformer();
+  let userRefreshQueued = false;
+  let userTransformerStopped = false;
+  const refreshUserTransformer = () => {
+    if (userRefreshQueued || userTransformerStopped) return;
+    userRefreshQueued = true;
+    queueMicrotask(() => {
+      userRefreshQueued = false;
+      if (userTransformerStopped) return;
+      removeUserTransformer();
+      removeUserTransformer = addUserTransformer();
+    });
+  };
+  const removeAskListener = onCodexAskChange(refreshUserTransformer);
+  const removePlanListener = onPlanHistoryChange(refreshUserTransformer);
 
   const removeUserRenderer = client.addTimelineRenderer({
     kind: "omp-user-message",
@@ -384,7 +447,17 @@ export default function contribute(client: PluginClientContext) {
   });
 
   return () => {
+    outlineStopped = true;
+    stopOutlineAgents();
+    outlineButtons.forEach(button => button.remove());
+    outlineButtons.clear();
+    removeOutline();
+    removeOutlineCommand();
+    stopQuestionCapture();
+    stopQuestionArchive();
     registerPanelOpener(null);
+    registerPlanPanelOpener(null);
+    removePlanPanel();
     removeRemotePreferences();
     removeSettingsCommand();
     removeSettingsCenterItem();
@@ -407,6 +480,9 @@ export default function contribute(client: PluginClientContext) {
     removeReasoningRenderer();
     removeTodoTransformer();
     removeTodoRenderer();
+    userTransformerStopped = true;
+    removeAskListener();
+    removePlanListener();
     removeUserTransformer();
     removeUserRenderer();
     removeAssistantTransformer();

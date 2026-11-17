@@ -41,7 +41,9 @@ No GitHub Actions minutes are consumed.
   later fails. Those kinds appear dimmed and locked under "Collapse when
   finished". When every kind starts collapsed, "Only fold longer cards" dims.
 - A manual expand or collapse must not be overridden.
-- Failed calls and Ask/question cards stay open unless start-collapsed.
+- Failed calls stay open unless start-collapsed. Questions (ask) can be selected
+  independently for start-collapsed and collapse-on-finish; unanswered questions
+  stay open on finish. Check a Codex async question folds when its answers arrive.
 - A failed edit or write shows no `+X -Y` count, and a failed edit labels its
   diff "Not applied".
 - Verify the **Collapse** action at the bottom of an expanded long card.
@@ -137,6 +139,69 @@ Use an iPhone or iPad; Android and web must look and behave as before.
 - On Android and web no **Select** control appears, and a long-press does not
   open the dialog.
 
+## Conversation outline
+
+- Click Outline beside the message composer, or use `/outline`, in an agent
+  conversation. Both open the same agent's panel. Prompts, questions, plans and decisions,
+  and failures appear newest first. Successful file changes, ordinary reads and
+  successful shell output stay out of the index. Failed edits remain visible as errors.
+  New history updates the panel.
+- Select an entry to read its content, then return to the outline. Search filters
+  loaded history. Load earlier history extends the index without duplicating calls.
+- Toggle the coloured Prompt, Question, Plan and Error filters independently.
+  Search and types combine; turning every type off shows an explanatory empty
+  state. Refresh and loading older history preserve the selection.
+- Technical plan/answer prompts disappear only when the matching content exists.
+- On desktop, Find in chat jumps to an already mounted row. For an unloaded row,
+  the experimental adapter loads a native window around its sequence and uses
+  that chat's viewport to reveal it, including a collapsed card group. Cancel jump
+  or scroll the chat manually to cancel. A different host/agent, stale epoch or
+  unsupported private runtime must leave the preview readable and show a message.
+- Collapse the destination card itself and its group, then jump to it from Outline.
+  Both open before navigation completes. Repeat with start-collapsed and automatic
+  collapse enabled: explicit navigation keeps the destination open. Closing it
+  manually afterwards must still work.
+- Switch agents: no entries from the previous conversation remain. Simulate an
+  offline daemon and check the error and Refresh action. Check the panel on native:
+  previews work while the unsupported chat-jump action is absent.
+
+## Plans in history
+
+- Open Compare with beside the copy/export controls in a plan card, the plan side
+  panel and Outline's plan details. Choose another plan from the same conversation:
+  Current plan (new) is the open plan and Baseline (old) is the selected one;
+  green lines were added by the current plan and red lines were removed. Lines have
+  the correct direction. The source call is excluded from the picker.
+- Load earlier history if the second plan is older. Identical plans report no
+  differences. Change the target or close comparison. Switch the source plan or
+  agent and verify that the previous comparison does not remain on screen.
+
+- In both the plan card and side panel, Copy Markdown copies the original source,
+  including Polish text, code fences and links, without approval messages or badges.
+- Open a Plan entry from Outline: its detail view offers the same copy/export
+  actions using the original Markdown. The outline list and non-plan detail views
+  do not show those actions.
+- On desktop, Export .md starts a download named after the plan heading. Open it
+  in an editor and compare the source. Check a title with punctuation and an
+  unusually long title. On native, Share Markdown opens the system share sheet;
+  canceling it must not claim a successful share.
+- Switch the selected panel plan after copying: old action feedback clears and
+  copying/exporting uses the newly selected plan. Clipboard/download failures
+  show an error instead of claiming success.
+
+- In Claude, `ExitPlanMode` with plan detail renders as Awaiting decision before
+  approval. Its `plan_approval` update retains the Markdown and shows the outcome.
+
+- Find Codex `plan` and `plan_approval` entries, including an accepted and a rejected
+  plan. Expand them: headings, lists, tables and fenced code render as Markdown.
+- Approval cards show Awaiting decision, Approved or Rejected only as reported by
+  Paseo. A historical plan without an outcome shows Proposed plan.
+- Press Open in side panel. The plan remains beside the conversation, and opening
+  a different plan replaces it. A panel in another workspace keeps its own plan.
+- Leave the panel open while accepting or rejecting that plan: its status updates
+  when the corresponding history card receives the outcome. Reopen the conversation
+  and check that plans remain readable from history.
+
 ## Questions the agent asks
 
 Ask an agent to use its question tool, with one question and then with several
@@ -151,7 +216,19 @@ Ask an agent to use its question tool, with one question and then with several
 - A call with several questions lists all of them, each with its own answer; the
   title reads "first question (+N more)".
 - Dismiss the prompt without answering: the card says "no answer recorded".
-- While it waits, the card says "Waiting for a decision" and does not fold.
+- While it waits, the card says "Waiting for a decision" and stays open unless
+  Questions (ask) is selected under Cards that start collapsed.
+- In Codex, answer an async question with an option containing a comma. All
+  options remain separate and the selected one is ticked. Reload the plugin:
+  captured options and the selected answer should survive through daemon storage.
+- Also test synchronous Codex `request_user_input`: questions, option descriptions
+  and selections come directly from timeline metadata, including on history replay.
+- Codex questions without archived definitions retain their readable text fallback.
+- A Codex answer's duplicate user message disappears without a gap, including
+  when its question card belongs to an automatically collapsed run. A message
+  with different or additional text remains visible.
+- With both Questions (ask) collapse settings off, an answered card remains open.
+  Enable collapse-on-finish: it folds after all answers arrive, unless touched.
 
 ## Interoperability
 
@@ -161,6 +238,49 @@ Ask an agent to use its question tool, with one question and then with several
 
 ## Current verification status
 
-There is no automated test suite. `npm run typecheck` must pass, and each
-change is checked by hand in a running Paseo (`paseo plugin reload`) on a dark
+Experimental iOS selection: run `node tests/ios-selectable-prose.test.cjs`.
+On a native iPad, select across adjacent prose paragraphs, headings, lists and
+quotes, including bold and inline code, copy using the system menu, then immediately select another range
+in the same message and in a prompt. Repeat with another system language.
+Copy should appear once and the previous selection should clear. Clipboard
+content is never read by the selection reset listener. If the private Expo
+module is unavailable, automatic reset is unsupported. Check Android and web
+retain their original selection behavior. Selection across separate timeline
+messages is not implemented. Rich links, paths and other blocks still use the
+existing renderer. The owner confirmed partial selection, cross-block selection
+within one answer and copy/reset on the native iPad app. Cross-message selection
+was investigated and intentionally left out. Android and web visual regression
+checks and additional iOS versions remain unverified. The adapter uses private
+React/Expo bindings and may fall back to the existing renderer on another host.
+
+Run `node tests/plan-history.test.cjs` to verify that mounting and reprojecting
+two different plans converges without repeated history invalidation. On a long
+conversation containing multiple plans, enable Refined Chat with grouping both
+on and off: the conversation should remain responsive, and each plan should open
+its own text in the side panel and comparison picker.
+
+Run the focused parser, archive and collapse tests with
+`node tests/ask-question.test.cjs`, `node tests/question-archive.test.cjs` and
+`node tests/tool-collapse.test.cjs`. `npm run typecheck` must also pass.
+Check UI changes by hand in a running Paseo (`paseo plugin reload`) on a dark
 and a light theme. Each PR states what was and was not exercised.
+
+
+## Diff views and syntax colours
+
+Run `node tests/diff-view.test.cjs` and `npm run typecheck`.
+In an edit card, check a C# or Razor diff: keywords, strings and comments
+retain source colours while additions/removals have tinted backgrounds.
+Switch Inline / Side by side: old content stays left, new content right,
+context aligns, and unequal additions/removals leave empty cells. Check line
+numbers and a multi-hunk change. Open Fullscreen from a folded long diff:
+the viewer shows all rows while the chat block stays folded. Close with the
+button, Escape on web or Android back. Copy still returns the original patch.
+Repeat on a narrow viewport and both themes; check a plain-text diff and the
+plan comparison too. Unknown file types should have neutral body text.
+
+- In dark and light themes, fullscreen has an opaque theme background and one
+  fixed toolbar; scrolling the diff does not hide Close, layout switching or Copy.
+- Group a plan with a thought and another tool: its summary counts the plan
+  separately, including while closed. Plan collapse preferences remain Other
+  tools; no new Plan setting should appear.

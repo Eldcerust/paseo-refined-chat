@@ -1,3 +1,5 @@
+import { ColorPreview, ColorText } from "./color-preview";
+import { IOSSelectableProse, selectableProseMarkdown, isSelectableProseBlock } from "../ios-selectable-prose";
 import React, { createContext, useContext, useMemo, useState } from "react";
 import { View, Text, Pressable, ScrollView, Platform, StyleSheet } from "react-native";
 import type { TextStyle, ViewStyle } from "react-native";
@@ -351,6 +353,37 @@ export function MarkdownView({
       index = end - 1;
       continue;
     }
+    // Without the host's `Markdown`, iOS draws prose through upstream's selectable
+    // wrapper instead, so a long-press still selects text.
+    if (Platform.OS === "ios" && isSelectableProseBlock(block) && marked !== index) {
+      const fallback: React.ReactNode[] = [];
+      let end = index;
+      while (end < blocks.length && end !== marked && isSelectableProseBlock(blocks[end]!)) {
+        const next = blocks[end]!;
+        fallback.push(next.kind === "paragraph"
+          ? <Text key={`p${end}`} selectable style={styles.paragraph}>{renderInline(next.spans, styles, `p${end}`)}</Text>
+          : renderBlock(next, `p${end}`, end === 0, context));
+        end++;
+      }
+      const markdown = lines.slice(starts[index], starts[end] ?? lines.length).join("\n").trimEnd();
+      const body = styles.paragraph;
+      rendered.push(<IOSSelectableProse key={`prose${index}`} markdown={markdown} textStyle={body}
+        paragraphGap={metrics.blockGap} inlineStyles={{ strong: styles.strong, emphasis: styles.emphasis, code: styles.codeSpan }}
+        blockStyles={{
+          h1: { ...styles.h1, marginTop: metrics.blockGap, marginBottom: metrics.blockGap },
+          h2: { ...styles.h2, marginTop: metrics.blockGap, marginBottom: metrics.blockGap },
+          h3: { ...styles.h3, marginTop: metrics.blockGap, marginBottom: metrics.blockGap },
+          h4: { ...styles.h4, marginTop: metrics.blockGap, marginBottom: metrics.blockGap },
+          h5: { ...styles.h4, marginTop: metrics.blockGap, marginBottom: metrics.blockGap },
+          h6: { ...styles.h4, marginTop: metrics.blockGap, marginBottom: metrics.blockGap },
+          list: { ...body, marginTop: 0, marginBottom: metrics.blockGap, itemSpacing: metrics.itemGap },
+          blockquote: { ...body, ...styles.quoteText, marginTop: 0, marginBottom: metrics.blockGap },
+        }}>
+        <View style={{ gap: metrics.blockGap }}>{fallback}</View>
+      </IOSSelectableProse>);
+      index = end - 1;
+      continue;
+    }
     if (block.kind !== "image") {
       const node = renderBlock(block, `b${index}`, index === 0, context);
       rendered.push(index === marked ? markBlock(node, index) : node);
@@ -385,10 +418,10 @@ export function MarkdownView({
   }
 
   return (
-    <View {...selectionSurface} style={styles.root}>
+    <ColorPreview tokens={tokens}><View {...selectionSurface} style={styles.root}>
       <TextSelectionDialog text={snapshot} onClose={closeSelection} tokens={tokens} />
       {rendered}
-    </View>
+    </View></ColorPreview>
   );
 }
 
@@ -634,12 +667,16 @@ function renderBlock(
       );
     }
 
-    case "paragraph":
-      return (
-        <Text key={key} selectable {...context.longPress} style={styles.paragraph}>
-          {renderInline(block.spans, styles, key)}
-        </Text>
-      );
+    case "paragraph": {
+      // A paragraph native selection cannot take (a link, a file path) keeps the
+      // long-press that opens the Select dialog.
+      const original = <Text key={key} selectable {...context.longPress} style={styles.paragraph}>{renderInline(block.spans, styles, key)}</Text>;
+      if (Platform.OS !== "ios") return original;
+      const markdown = selectableProseMarkdown(block.spans);
+      return markdown !== null ? <IOSSelectableProse key={key} markdown={markdown} textStyle={styles.paragraph}
+        inlineStyles={{ strong: styles.strong, emphasis: styles.emphasis, code: styles.codeSpan }}>{original}</IOSSelectableProse>
+        : <React.Fragment key={key}>{original}</React.Fragment>;
+    }
 
     case "list": {
       const numberWidth = orderedColumnWidth(block.items, metrics);
@@ -842,14 +879,14 @@ export const RevealPathContext = createContext<((path: string, kind: PathKind) =
  * link hover. Only a reveal: nothing is run, and a path that does not exist does
  * nothing.
  */
-function CodeSpan({ text, style }: { text: string; style: TextStyle }) {
+function CodeSpan({ text, style, prefix = "", suppressColors = false }: { text: string; style: TextStyle; prefix?: string; suppressColors?: boolean }) {
   const reveal = useContext(RevealPathContext);
   const { pathOpens } = useEnhancerPreferences();
   const kind = reveal ? pathKind(text) : null;
   if (!reveal || !kind) {
     return (
       <Text selectable style={style}>
-        {text}
+        {suppressColors ? text : <ColorText text={text} prefix={prefix} />}
       </Text>
     );
   }
@@ -870,37 +907,42 @@ function renderInline(
   spans: MdInline[],
   styles: MarkdownStyles,
   keyPrefix: string,
+  prefix = "",
+  suppressColors = false,
 ): React.ReactNode[] {
+  let preceding = prefix;
   return spans.map((span, index) => {
     const key = `${keyPrefix}i${index}`;
+    const before = preceding;
+    preceding += inlineText([span]);
     switch (span.kind) {
       case "text":
-        return span.text;
+        return suppressColors ? span.text : <ColorText key={key} text={span.text} prefix={before} />;
       case "codeSpan":
-        return <CodeSpan key={key} text={span.text} style={styles.codeSpan} />;
+        return <CodeSpan key={key} text={span.text} style={styles.codeSpan} prefix={before} suppressColors={suppressColors} />;
       case "strong":
         return (
           <Text key={key} selectable style={styles.strong}>
-            {renderInline(span.spans, styles, key)}
+            {renderInline(span.spans, styles, key, before, suppressColors)}
           </Text>
         );
       case "emphasis":
         return (
           <Text key={key} selectable style={styles.emphasis}>
-            {renderInline(span.spans, styles, key)}
+            {renderInline(span.spans, styles, key, before, suppressColors)}
           </Text>
         );
       case "strike":
         return (
           <Text key={key} selectable style={styles.strike}>
-            {renderInline(span.spans, styles, key)}
+            {renderInline(span.spans, styles, key, before, suppressColors)}
           </Text>
         );
       case "mark":
-        if (!styles.mark) return ["==", ...renderInline(span.spans, styles, key), "=="];
+        if (!styles.mark) return ["==", ...renderInline(span.spans, styles, key, before, suppressColors), "=="];
         return (
           <Text key={key} selectable style={styles.mark}>
-            {renderInline(span.spans, styles, key)}
+            {renderInline(span.spans, styles, key, before, suppressColors)}
           </Text>
         );
       case "link":
@@ -957,7 +999,7 @@ function MarkdownLink({
           ? linkProps(href, inlineText(spans))
           : null)}
     >
-      {renderInline(spans, styles, "l")}
+      {renderInline(spans, styles, "l", "", /^https?:\/\/(?:www\.)?github\.com\//i.test(href))}
     </Text>
   );
 }

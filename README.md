@@ -5,7 +5,7 @@ Oh My Pi and others that Paseo drives): tool calls, reasoning, prompts, approval
 typed, syntax-aware cards that follow the active Paseo theme, and you decide how big the text is, what
 folds, and how it is coloured. Coverage of specialised events can differ by provider.
 
-![A turn in Refined Chat: a prompt, a command card, a folded read, and a reply with a coloured accent, bold text and a highlight mark](images/hero.png)
+![Refined Chat with sample data: a prompt, a file read, a task result and a formatted reply](images/hero.png)
 
 - **Three independent text sizes** for replies, tool cards and code, plus reply line spacing.
 - **You choose what folds**: which card kinds start collapsed, which fold when they finish, and how long
@@ -14,6 +14,10 @@ folds, and how it is coloured. Coverage of specialised events can differ by prov
   one palette or any hex.
 - **Readable cards** for shell, git, read, write, edit, MCP, eval, subagents, hub and Paseo tools,
   with a one-line summary of what each did.
+- **Conversation outline** with search, type filters and navigation to history.
+- **Plan history** with Markdown preview, copy/export and manual comparison.
+- **Diff views** with source syntax colours, side by side layout and fullscreen.
+- **Native iOS selection** within compatible prose and prompts, confirmed on iPad; selection stops at separate messages and unsupported blocks.
 - **Images** in replies and image reads, with a viewer.
 - **Links** that show where they go and warn when the text disagrees with the target.
 - A read-only **file preview** in the side panel for a path in a reply or on a tool card, with the line marked.
@@ -48,7 +52,21 @@ remove the old one with `paseo plugin remove refined-chat`, or give the new one 
 To use the original instead, install it from the Paseo catalog with
 `paseo plugin add genodevelop/refined-chat`.
 
-Requires **Paseo 0.11.0 or later**. Everything below is configured in
+The catalog installs a revision a reviewer has checked, and a new version reaches it
+only when it is submitted again. To follow the original's `main` instead, install from
+its public GitHub repository:
+
+```bash
+paseo plugin add git:GenoDevelop/paseo-refined-chat
+```
+
+Or pin a published release of the original by its tag:
+
+```bash
+paseo plugin add git:GenoDevelop/paseo-refined-chat --ref v0.6.1
+```
+
+Requires **Paseo 0.14.0 or later**. Everything below is configured in
 **Settings → Plugins → Refined Chat**, and each setting is stored on the client you change it on.
 
 ---
@@ -118,8 +136,8 @@ Nothing folds on its own until you pick something here.
 | Cards to collapse when finished | Kinds that fold back up once they finish. A thinking stream stays open while it streams. A kind that already starts collapsed is dimmed here. |
 | Only fold longer cards | Keeps a card open while its output, code and diff add up to fewer lines than the limit. Dimmed when no kind is left to fold. |
 
-The kinds are Shell and Git, Writes, Edits, Reads, Other tools and Thinking. A card you open or close
-yourself keeps its state, and an ask card never folds. Expanded cards have a **Collapse** control at the
+The kinds are Shell and Git, Writes, Edits, Reads, Questions (ask), Other tools and Thinking. Questions
+fold on finish only after all answers are recorded. A card you open or close yourself keeps its state. Expanded cards have a **Collapse** control at the
 bottom, so you do not scroll back to the header.
 
 ![Folding: a read folded after it finished, a written file cut off after 30 lines, and command output with its middle folded](docs/images/folding.png)

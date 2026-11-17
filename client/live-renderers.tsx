@@ -1,5 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { collapseKind } from "./tool-collapse";
+import { parsePlan, planTitle } from "./plan";
+import { rememberPlan, useHiddenPlanMessage } from "./plan-history";
+import { openPlanPreview, updatePlanPreview } from "./plan-preview";
 import { View } from "react-native";
 import { useAgent, usePaseo, useRpc } from "@getpaseo/plugin/client";
 import { useRevealedText } from "@getpaseo/plugin/client/react-native";
@@ -45,7 +48,8 @@ import type {
   GitHubToolData,
   AskQuestionData,
 } from "../shared/contracts";
-import { applyAnswers, isAskTool, parseAskQuestions } from "./ask-question";
+import { applyAnswers, askTranscript, isAskTool, parseAskQuestions, parseCodexQuestionMetadata } from "./ask-question";
+import { noteCodexAskReply, useCodexAsk, useIsCodexAskReply } from "./codex-ask";
 import { fileKindRpc, revealPathRpc } from "../shared/file-rpc";
 import { buildGitHubData } from "./github-request";
 import { useImageFile } from "./image-file";
@@ -64,6 +68,7 @@ export interface LiveToolCallPayload {
   name: string;
   status: string;
   detail?: Record<string, unknown>;
+  metadata?: Record<string, unknown>;
   callId?: string;
   /** Epoch milliseconds the call was first seen running. */
   startedAt?: number;
@@ -381,6 +386,13 @@ export function LiveToolCallRenderer({
   usePointerGlow(preferences.pointerGlow);
   useFrostedGlass(preferences.frostedGlass);
   const data = item.data;
+  const codexAsk = useCodexAsk(
+    agentId,
+    data.callId,
+    timestamp.getTime(),
+    data.name.toLowerCase() === "request_user_input_async" && data.detail?.type === "plain_text"
+      && typeof data.detail.text === "string" ? data.detail.text : undefined,
+  );
   const runKey = `tool:${data.callId ?? data.name}:${timestamp.getTime()}`;
 
   const calloutData = useMemo((): ToolCalloutData => {
@@ -496,6 +508,7 @@ export function LiveToolCallRenderer({
     const durationMs =
       typeof detail.durationMs === "number" ? detail.durationMs : extractEvalDuration(output);
     let toolKind: ToolCallKind = "bash";
+    const plan = parsePlan(rawName, detail, data.metadata, data.status);
     let hub: HubData | undefined;
     let mcp: McpToolData | undefined;
     let subagent: ToolCalloutData["subagent"];
@@ -558,9 +571,17 @@ export function LiveToolCallRenderer({
       toolKind = "mcp";
       title = rawName.replace(/^mcp__/, "").replace(/__/g, " / ");
       mcp = buildMcpData(rawName, input, output, durationMs);
+    } else if (plan) {
+      toolKind = "plan";
+      title = planTitle(plan.text);
     } else if (isAskTool(rawName)) {
       toolKind = "ask";
       askQuestions = applyAnswers(parseAskQuestions(input), [detail, output], outputText);
+      if (rawName === "request_user_input") {
+        const questions = parseCodexQuestionMetadata(data.metadata);
+        if (questions.length) askQuestions = questions;
+      }
+      if (!askQuestions.length && codexAsk.questions.length) askQuestions = codexAsk.questions;
       const first = askQuestions[0];
       const lead = first?.question || first?.header || "User Decision";
       title = askQuestions.length > 1 ? `${lead} (+${askQuestions.length - 1} more)` : lead;
@@ -595,7 +616,7 @@ export function LiveToolCallRenderer({
           : undefined;
 
     return {
-      id: `live-${rawName}`,
+      id: data.callId ?? runKey,
       tool: toolKind,
       title,
       status:
@@ -614,9 +635,12 @@ export function LiveToolCallRenderer({
       diff,
       diffComputed: !providerDiff && computedEditDiff !== undefined ? true : undefined,
       editNewText: !providerDiff && computedEditDiff !== undefined ? editNew : undefined,
-      output: toolKind === "github" || evalCells.length > 0 ? undefined : outputText || errorText,
+      output: toolKind === "github" || evalCells.length > 0 ? undefined :
+        (toolKind === "ask" ? codexAsk.transcript || askTranscript(detail, outputText) : outputText) || errorText,
       cells: evalCells.length > 0 ? evalCells : undefined,
       askQuestions: askQuestions.length > 0 ? askQuestions : undefined,
+      plan,
+      askTranscript: askQuestions.length === 0 ? codexAsk.transcript : undefined,
       // The first question, for the code that predates several per call.
       askOptions: askQuestions[0]?.options.length ? askQuestions[0].options : undefined,
       askAnswer: askQuestions[0]?.answers.length ? askQuestions[0].answers : undefined,
@@ -628,7 +652,14 @@ export function LiveToolCallRenderer({
       paseo,
       github,
     };
-  }, [data]);
+  }, [data, runKey, codexAsk.questions, codexAsk.transcript]);
+
+  useEffect(() => {
+    if (calloutData.plan) {
+      rememberPlan(agentId, calloutData.id, calloutData.plan);
+      if (workspaceId) updatePlanPreview(workspaceId, calloutData.id, calloutData.plan, agentId);
+    }
+  }, [agentId, workspaceId, calloutData.id, calloutData.plan]);
 
   // The dock has no access to the job manager, so the timeline is its only
   // source: every job snapshot that passes through a card is republished, and
@@ -643,16 +674,12 @@ export function LiveToolCallRenderer({
     });
   }, [hubData, agentId]);
 
-  // A card starts open unless the reader asked this kind to start folded. An
-  // ask card holds a question, so it never starts folded. The auto-collapse
-  // effect below folds a finished card when that preference is set.
-  const startsFolded =
-    calloutData.tool !== "ask" &&
-    preferences.startCollapsedKinds.includes(collapseKind(calloutData.tool));
-  // Start open unless the reader asked this kind to start folded. "Collapse
-  // when finished" is handled by the auto-collapse effect below; folding every
-  // completed card up front hid shell and search output behind a click.
-  const isExpanded = !startsFolded;
+  // A card starts open unless the reader asked this kind to start folded, and
+  // that includes the question card (Questions (ask)). "Collapse when finished"
+  // is handled by the auto-collapse effect below; folding every completed card
+  // up front hid shell and search output behind a click, so upstream's
+  // `startsExpanded`, which does that, is deliberately not used here.
+  const isExpanded = !preferences.startCollapsedKinds.includes(collapseKind(calloutData.tool));
 
   useRunMember(
     agentId,
@@ -660,10 +687,10 @@ export function LiveToolCallRenderer({
     toolCardId(data.callId),
     timestamp.getTime(),
     {
-      kind: collapseKind(calloutData.tool),
+      kind: calloutData.tool === "plan" ? "plan" : collapseKind(calloutData.tool),
       status: calloutData.status === "completed" ? "done" : calloutData.status,
     },
-    preferences.cardRunBar,
+    preferences.cardRunBar && !codexAsk.hidden,
   );
   // A card still going stays drawn under the bar of its closed run.
   const runClosed =
@@ -700,6 +727,8 @@ export function LiveToolCallRenderer({
   const finishedAt = data.status === "running" ? undefined : timestamp.getTime();
   if (finishedAt !== undefined) noteSectionEnd(agentId, finishedAt, "tool");
 
+  if (codexAsk.hidden) return null;
+
   if (runClosed) {
     return (
       <View {...runRowProps(runKey)}>
@@ -709,10 +738,13 @@ export function LiveToolCallRenderer({
   }
 
   return (
-    <View {...runRowProps(runKey)}>
+    <View {...runRowProps(runKey)} nativeID={data.callId ? `refined-outline:${agentId}:${data.callId}` : undefined}>
       <RunBar agentId={agentId} cardKey={runKey} enabled={preferences.cardRunBar} rule={preferences.cardRunCollapse} startCollapsed={preferences.startCollapsedKinds} tokens={tokens} />
       <ToolCallout
         data={calloutData}
+        revealKey={data.callId ? `${agentId}:${data.callId}` : undefined}
+        planAgentId={agentId}
+        onOpenPlan={workspaceId && calloutData.plan ? () => openPlanPreview(workspaceId, calloutData.id, calloutData.plan!, agentId) : undefined}
         tokens={tokens}
         stateKey={preferences.cardRunBar ? runKey : undefined}
         defaultExpanded={isExpanded}
@@ -1107,6 +1139,12 @@ export function LiveUserMessageRenderer({
   timestamp,
 }: PluginTimelineItemProps<LiveUserMessagePayload>) {
   const preferences = useEnhancerPreferences();
+  const matchesAsk = useIsCodexAskReply(agentId, item.data.text);
+  const hiddenPlan = useHiddenPlanMessage(agentId, item.data.messageId, item.data.text, Boolean(item.data.images?.length));
+  const hiddenAskReply = (matchesAsk || hiddenPlan) && !item.data.images?.length;
+  useEffect(() => {
+    if (hiddenAskReply) noteCodexAskReply(agentId, item.data.messageId, item.data.text);
+  }, [hiddenAskReply, agentId, item.data.messageId, item.data.text]);
   const tokens = useMemo(
     () => buildThemeTokens(theme.colors, preferences),
     [theme.colors, preferences],
@@ -1120,7 +1158,7 @@ export function LiveUserMessageRenderer({
     undefined,
     timestamp.getTime(),
     undefined,
-    preferences.cardRunBar,
+    preferences.cardRunBar && !hiddenAskReply,
   );
   const paseo = usePaseo();
   const handle = useMemo(() => paseo.agents.ref(agentId), [paseo, agentId]);
@@ -1165,6 +1203,8 @@ export function LiveUserMessageRenderer({
 
   // A prompt is the settled start of whatever section follows it.
   noteSectionEnd(agentId, timestamp.getTime(), "user");
+
+  if (hiddenAskReply) return null;
 
   return (
     <View {...surfaceProps(runRowProps(runItemKey("user", item.data.text, timestamp.getTime())), promptRowAnchor(item.data.messageId))}>

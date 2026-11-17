@@ -6,10 +6,64 @@ import type { AskQuestionData } from "../shared/contracts";
  * `request_user_input` (Codex). They share one shape — a list of questions,
  * each with options — so a single card draws all of them.
  */
-const ASK_TOOLS = new Set(["ask", "question", "askuserquestion", "requestuserinput"]);
+const ASK_TOOLS = new Set(["ask", "question", "askuserquestion", "requestuserinput", "requestuserinputasync"]);
 
 export function isAskTool(name: string): boolean {
   return ASK_TOOLS.has(name.toLowerCase().replace(/[^a-z]/g, ""));
+}
+
+/** Codex's projected question card carries its readable transcript, not arguments. */
+export function askTranscript(detail: Record<string, unknown>, output: string | undefined): string | undefined {
+  return output || (detail.type === "plain_text" && typeof detail.text === "string" ? detail.text : undefined);
+}
+
+/** Only the host's complete answer envelope can duplicate a question card. */
+export function isAskReply(message: string, transcript: string): boolean {
+  const normalized = message.replace(/\r\n/g, "\n").trim();
+  const prefix = "Answers to your questions:\n\n";
+  const body = transcript.replace(/\r\n/g, "\n").trim();
+  return body !== "" && normalized.startsWith(prefix) && normalized.slice(prefix.length) === body;
+}
+
+/** Use known question boundaries, preserving options and multiline typed replies. */
+export function answerCodexQuestions(questions: AskQuestionData[], transcript: string): AskQuestionData[] {
+  const text = transcript.replace(/\r\n/g, "\n").trim();
+  const initial = questions.map(q => [q.question, q.options.map(o => o.label).join(", ")]
+    .filter(Boolean).join("\n")).join("\n\n");
+  if (text === initial) return questions;
+  let rest = text;
+  const result: AskQuestionData[] = [];
+  for (let index = 0; index < questions.length; index++) {
+    const question = questions[index]!;
+    const prefix = `${question.question}\n`;
+    if (!rest.startsWith(prefix)) return [];
+    rest = rest.slice(prefix.length);
+    const next = questions[index + 1];
+    const boundary = next ? `\n\n${next.question}\n` : undefined;
+    const end = boundary ? rest.indexOf(boundary) : rest.length;
+    if (end < 0 || (boundary && rest.indexOf(boundary, end + 1) !== -1)) return [];
+    const answer = rest.slice(0, end);
+    if (!answer.trim()) return [];
+    result.push({ ...question, answers: [answer] });
+    if (next) rest = rest.slice(end + 2);
+  }
+  return result;
+}
+
+/** Pair only matching paragraph headings; never infer options by splitting commas. */
+export function pairAskTranscripts(before: string, after: string): AskQuestionData[] {
+  if (before === after) return [];
+  const initial = before.replace(/\r\n/g, "\n").trim().split(/\n\s*\n/);
+  const answered = after.replace(/\r\n/g, "\n").trim().split(/\n\s*\n/);
+  if (initial.length !== answered.length) return [];
+  const questions: AskQuestionData[] = [];
+  for (let index = 0; index < initial.length; index++) {
+    const question = initial[index]!.split("\n")[0]!;
+    const [heading, ...reply] = answered[index]!.split("\n");
+    if (!question || heading !== question || !reply.join("\n").trim()) return [];
+    questions.push({ question, multiple: false, options: [], answers: [reply.join("\n")] });
+  }
+  return questions;
 }
 
 function text(value: unknown): string {
@@ -55,7 +109,7 @@ export function parseAskQuestions(input: Record<string, unknown>): AskQuestionDa
   return entries.flatMap((entry): AskQuestionData[] => {
     const raw = object(entry);
     if (!raw) return [];
-    const question = text(raw.question);
+    const question = text(raw.question) || text(raw.title);
     const options = parseOptions(
       raw.options,
       typeof raw.recommended === "number" ? raw.recommended : undefined,
@@ -70,6 +124,23 @@ export function parseAskQuestions(input: Record<string, unknown>): AskQuestionDa
         answers: [],
       },
     ];
+  });
+}
+
+/** Synchronous Codex calls retain questions and ID-keyed answers in timeline metadata. */
+export function parseCodexQuestionMetadata(value: unknown): AskQuestionData[] {
+  const metadata = object(value);
+  if (!metadata || !Array.isArray(metadata.questions)) return [];
+  const answers = object(metadata.answers);
+  return metadata.questions.flatMap(entry => {
+    const raw = object(entry);
+    if (!raw) return [];
+    const question = parseAskQuestions({ questions: [raw] })[0];
+    if (!question) return [];
+    const recorded = typeof raw.id === "string" ? answers?.[raw.id] : undefined;
+    return [{ ...question, answers: Array.isArray(recorded)
+      ? recorded.filter((answer): answer is string => typeof answer === "string" && answer.length > 0)
+      : [] }];
   });
 }
 

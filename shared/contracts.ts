@@ -83,6 +83,7 @@ export type ToolCallKind =
   | "eval"
   | "task"
   | "ask"
+  | "plan"
   | "hub"
   | "paseo"
   | "ast_grep"
@@ -406,7 +407,13 @@ export interface AskQuestionData {
   answers: string[];
 }
 
+export interface PlanData {
+  text: string;
+  decision: "proposed" | "pending" | "approved" | "rejected" | "canceled";
+}
+
 export interface ToolCalloutData {
+  plan?: PlanData;
   id: string;
   tool: ToolCallKind;
   title: string;
@@ -441,6 +448,8 @@ export interface ToolCalloutData {
   askAnswer?: string[];
   /** Every question the call asked, each with its own options and answer. */
   askQuestions?: AskQuestionData[];
+  /** Codex's readable transcript when the host omits structured question data. */
+  askTranscript?: string;
   /**
    * One `task` call spawns a batch: the tool takes a shared `context` plus a
    * list of briefs, so the card carries the list. `model` is absent here on

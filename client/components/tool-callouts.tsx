@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useEffect, useRef, useCallback } from "react";
-import { saveCardState, savedCardState } from "../card-state";
+import { saveCardState, savedCardState, subscribeCardReveal } from "../card-state";
 import { View, Text, Pressable, StyleSheet, Platform } from "react-native";
-import type { TextStyle, ViewStyle } from "react-native";
+import type { TextStyle, ViewStyle, ViewProps } from "react-native";
 import { Glyph } from "./glyph";
 import { frosted } from "./frosted";
 import { surfaceProps } from "./view-props";
@@ -30,7 +30,9 @@ import type { ToolCalloutData } from "../../shared/contracts";
 import { lineSelector } from "../../shared/file-rpc";
 import { displayPath } from "../file-link";
 import { sameAnswer } from "../ask-question";
-import { shouldAutoCollapse } from "../tool-collapse";
+import { PlanBadge, PlanContent } from "../plan-preview";
+import { RevealPathContext } from "./markdown/markdown-view";
+import { hasAskAnswers, shouldAutoCollapse } from "../tool-collapse";
 import type { AutoCollapseRules } from "../tool-collapse";
 
 /** Lines in a block of text, ignoring the newline that ends the last one. */
@@ -55,6 +57,7 @@ function getToolIconName(tool: string): string {
   if (tool === "thinking") return "Brain";
   if (tool === "eval") return "Play";
   if (tool === "ask") return "HelpCircle";
+  if (tool === "plan") return "ListChecks";
   if (tool === "mcp") return "Plug";
   if (tool === "task") return "Bot";
   if (tool === "hub") return "Radio";
@@ -63,6 +66,8 @@ function getToolIconName(tool: string): string {
 
 interface ToolCalloutProps {
   data: ToolCalloutData;
+  onOpenPlan?: () => void;
+  planAgentId?: string;
   tokens: ExtendedThemeTokens;
   defaultExpanded?: boolean;
   /**
@@ -72,6 +77,7 @@ interface ToolCalloutProps {
   autoCollapse?: AutoCollapseRules;
   /** Keeps the open state across being hidden and shown again; see `card-state`. */
   stateKey?: string;
+  revealKey?: string;
   /**
    * Opens a path: in the side panel when it is a file there, otherwise in the
    * machine's own file manager. `kind` is passed when the text already says
@@ -103,10 +109,13 @@ interface ToolCalloutProps {
 
 export function ToolCallout({
   data,
+  onOpenPlan,
+  planAgentId,
   tokens,
   defaultExpanded = true,
   autoCollapse,
   stateKey,
+  revealKey,
   onRevealPath,
   imageFile,
   editLine,
@@ -120,11 +129,16 @@ export function ToolCallout({
   const [expanded, setExpanded] = useState(restored?.expanded ?? defaultExpanded);
   const [touched, setTouched] = useState(restored?.touched ?? false);
   useEffect(() => saveCardState(stateKey, { expanded, touched }), [stateKey, expanded, touched]);
+  useEffect(() => {
+    if (!revealKey) return;
+    return subscribeCardReveal(revealKey, () => { setTouched(true); setExpanded(true); });
+  }, [revealKey]);
 
   // Every branch below needs a payload. A tool that carries none — a hub op
   // with no parsed record, an unmapped kind — would otherwise draw an empty
   // panel, so the raw output takes over.
   const hasTypedBody =
+    (data.tool === "plan" && Boolean(data.plan)) ||
     data.tool === "bash" ||
     data.tool === "shell" ||
     data.tool === "git" ||
@@ -135,7 +149,7 @@ export function ToolCallout({
     data.tool === "edit" ||
     data.tool === "eval" ||
     (data.tool === "mcp" && Boolean(data.mcp)) ||
-    (data.tool === "ask" && Boolean(data.askQuestions?.length)) ||
+    (data.tool === "ask" && Boolean(data.askQuestions?.length || data.askTranscript)) ||
     (data.tool === "task" && Boolean(data.subagent)) ||
     (data.tool === "hub" && Boolean(data.hub)) ||
     (data.tool === "paseo" && Boolean(data.paseo));
@@ -179,22 +193,26 @@ export function ToolCallout({
   const codeLimit = isRunning ? 0 : codeMaxLines;
 
   // A user who pressed the card owns its state from then on; auto-collapse
-  // only ever folds a card nobody has touched. An ask card carries the
-  // agent's question and its options, so it never folds on its own.
+  // only ever folds a card nobody has touched.
   const toggleExpanded = useCallback(() => {
     setTouched(true);
     setExpanded((previous) => !previous);
   }, []);
 
   const previousStatus = useRef(data.status);
+  const answered = data.tool === "ask" && hasAskAnswers(data);
+  const previouslyAnswered = useRef(answered);
   useEffect(() => {
     const wasRunning = previousStatus.current === "running";
+    // Codex reports a completed tool before the user answers its async question.
+    const justAnswered = answered && !previouslyAnswered.current;
     previousStatus.current = data.status;
+    previouslyAnswered.current = answered;
     if (touched) return;
-    if (autoCollapse && wasRunning && shouldAutoCollapse(data, autoCollapse)) {
+    if (autoCollapse && (wasRunning || justAnswered) && shouldAutoCollapse(data, autoCollapse)) {
       setExpanded(false);
     }
-  }, [autoCollapse, touched, data]);
+  }, [autoCollapse, touched, data, answered]);
 
   // Only a real shell call can "complete without output". A git op or an
   // unmapped tool that prints nothing is not a silent command, so neither
@@ -640,7 +658,8 @@ export function ToolCallout({
 
   return (
     <View
-      {...surfaceProps(frosted, glowing(tokens.isDark), selectionSurface)}
+      {...surfaceProps(frosted, glowing(tokens.isDark), selectionSurface,
+        { dataSet: { outlineCardOpen: expanded ? "true" : "false" } } as unknown as ViewProps)}
       style={styles.container}
     >
       <Pressable onPress={toggleExpanded} style={styles.header}>
@@ -670,17 +689,22 @@ export function ToolCallout({
           {/* On Android a selectable Text ignores `numberOfLines`: a long command
               wrapped and the row cut off its second line. Web selects through
               the surface style, so only native gives up selecting the title. */}
-          <Text
+          {!(data.tool === "ask" && expanded) && <Text
             selectable={Platform.OS === "web"}
             style={styles.titleText}
             numberOfLines={1}
             ellipsizeMode="tail"
           >
             {data.title}
-          </Text>
+          </Text>}
         </View>
 
         <View style={styles.headerRight}>
+          {data.plan && <PlanBadge plan={data.plan} tokens={tokens} />}
+          {onOpenPlan && <Pressable accessibilityRole="button" accessibilityLabel="Open plan in side panel"
+            onPress={event => { event.stopPropagation(); onOpenPlan(); }}>
+            <Text style={{ color: tokens.accent, fontFamily: tokens.fontUi, fontSize: tokens.fs(11) }}>Open in side panel</Text>
+          </Pressable>}
           {diffStat && (diffStat.added > 0 || diffStat.removed > 0) ? (
             <View style={styles.diffStat}>
               {diffStat.added > 0 ? (
@@ -1052,6 +1076,30 @@ export function ToolCallout({
                   ) : null}
                 </View>
               ))}
+            </View>
+          )}
+
+          {data.tool === "plan" && data.plan && (
+            <RevealPathContext.Provider value={onRevealPath ?? null}>
+              <PlanContent plan={data.plan} tokens={tokens} agentId={planAgentId} callId={data.id} showStatus={false} />
+            </RevealPathContext.Provider>
+          )}
+
+          {data.tool === "ask" && !askQuestions.length && data.askTranscript && (
+            <View style={styles.askContainer}>
+              {data.askTranscript.split(/\n\s*\n/).map((paragraph, index) => {
+                const [heading, ...body] = paragraph.split("\n");
+                return (
+                  <View key={index} style={index > 0 ? styles.askQuestionGap : undefined}>
+                    <Text selectable style={styles.askQuestionText}>{heading}</Text>
+                    {body.length > 0 && (
+                      <View style={styles.askOptionCard}>
+                        <Text selectable style={styles.askAnswerValue}>{body.join("\n")}</Text>
+                      </View>
+                    )}
+                  </View>
+                );
+              })}
             </View>
           )}
 
